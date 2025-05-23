@@ -567,6 +567,29 @@ void richardson_step(
 
 int main( int argc, char** argv )
 {
+    /**
+
+    Boundary handling notes.
+
+    Using inhom boundary conditions we approach the elimination as follows (for the moment).
+
+    Let A be the "Neumann" operator, i.e., we do not treat the boundaries any differently.
+
+    1. Interpolate Dirichlet boundary conditions into g.
+    2. Compute g_A <- A       * g.
+    3. Compute g_D <- diag(A) * g.
+    4. Set the rhs to b = f - g_A.
+    5. Set the rhs at the boundary nodes to g_D.
+    6. Solve
+            A_elim x = b
+       where A_elim is A but with all off-diagonal entries in the same row/col as a boundary node set to zero.
+       In a matrix-free context, we have to adapt the element matrix A_local accordingly by (symmetrically ) zeroing
+       out all the off-diagonals (row and col) that correspond to a boundary node. But we keep the diagonal intact.
+       We still have diag(A) == diag(A_elim).
+    7. x is the solution of the original problem. No boundary correction should be necessary.
+
+    **/
+
     Kokkos::initialize( argc, argv );
     {
         // Set up subdomain.
@@ -631,26 +654,6 @@ int main( int argc, char** argv )
             "set on boundary",
             Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x(), grid.size_y(), grid.size_r() } ),
             SetOnBoundary( grid, Adiagg, b ) );
-
-        // Set up the operator.
-#if 0
-        Grid3DDataScalar< double > src( "src", grid.size_x(), grid.size_y(), grid.size_r() );
-        Grid3DDataScalar< double > dst( "dst", grid.size_x(), grid.size_y(), grid.size_r() );
-
-        Kokkos::parallel_for(
-            "test interpolation",
-            Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x(), grid.size_y(), grid.size_r() } ),
-            TestInterpolator( grid, src ) );
-
-        terra::kernels::common::set_constant( dst, 0.0 );
-
-        LaplaceOperator A( grid, src, dst );
-
-        Kokkos::parallel_for(
-            "matvec",
-            Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x() - 1, grid.size_y() - 1, grid.size_r() - 1 } ),
-            A );
-#endif
 
         // Solve.
 
