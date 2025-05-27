@@ -426,9 +426,8 @@ void write_rectilinear_to_triangular_vtu(
 }
 
 template <
-    typename PointRealT,      // Type for surface coordinates and radii elements
-    typename AttachedDataType // Number of components in the vector data (can be 0 if no vector data via optional)
-    >
+    typename PointRealT, // Type for surface coordinates and radii elements
+    typename AttachedDataType >
 void write_surface_radial_extruded_to_wedge_vtu(
     grid::Grid2DDataVec< PointRealT, 3 > surface_points_device_view,
     grid::Grid1DDataScalar< PointRealT > radii_device_view,
@@ -705,4 +704,631 @@ void write_surface_radial_extruded_to_wedge_vtu(
     vtk_file << "</VTKFile>\n";
     vtk_file.close();
 }
+
+class VTKOutput
+{
+  public:
+    // Define Host view types for field data storage for clarity
+    // Assuming input fields are double, will be cast to float on write.
+    // If input fields can be float, this could be templated further or use a base class.
+    using ScalarFieldHostView = Kokkos::View< double**** >;
+    using VectorFieldHostView = Kokkos::View< double**** [3] >;
+
+    template < class ShellCoordsView, class RadiiView >
+    VTKOutput(
+        const ShellCoordsView& shell_node_coords_device,
+        const RadiiView&       radii_per_layer_device,
+        const std::string&     output_path,
+        bool                   generate_quadratic_elements_from_linear_input = false )
+    : output_path_( output_path )
+    , is_quadratic_( generate_quadratic_elements_from_linear_input )
+    {
+        // 1. Copy input geometry data to managed host views (as before)
+        auto shell_coords_host_mirror_temp =
+            Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace(), shell_node_coords_device );
+        h_shell_coords_managed_ = Kokkos::View< double*** [3], Kokkos::LayoutRight, Kokkos::HostSpace >(
+            "h_shell_coords_managed_",
+            shell_node_coords_device.extent( 0 ),
+            shell_node_coords_device.extent( 1 ),
+            shell_node_coords_device.extent( 2 ) );
+        Kokkos::deep_copy( h_shell_coords_managed_, shell_coords_host_mirror_temp );
+
+        auto radii_host_mirror_temp =
+            Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace(), radii_per_layer_device );
+        h_radii_managed_ = Kokkos::View< double**, Kokkos::LayoutRight, Kokkos::HostSpace >(
+            "h_radii_managed_", radii_per_layer_device.extent( 0 ), radii_per_layer_device.extent( 1 ) );
+        Kokkos::deep_copy( h_radii_managed_, radii_host_mirror_temp );
+
+        // 2. Get INPUT dimensions
+        num_subdomains_      = h_shell_coords_managed_.extent( 0 );
+        NX_nodes_surf_input_ = h_shell_coords_managed_.extent( 1 );
+        NY_nodes_surf_input_ = h_shell_coords_managed_.extent( 2 );
+        NR_nodes_rad_input_  = h_radii_managed_.extent( 1 );
+
+        if ( NX_nodes_surf_input_ < 1 || NY_nodes_surf_input_ < 1 || NR_nodes_rad_input_ < 1 )
+        { // Min 1 node
+            throw std::runtime_error( "Input node counts must be at least 1 in each dimension." );
+        }
+        // Check for cell formation possibility
+        bool can_form_cells = ( NX_nodes_surf_input_ > 1 || NY_nodes_surf_input_ > 1 || NR_nodes_rad_input_ > 1 );
+        if ( !can_form_cells && ( NX_nodes_surf_input_ * NY_nodes_surf_input_ * NR_nodes_rad_input_ > 1 ) )
+        {
+            // Multiple points, but arranged as a line/plane that can't form 3D hex cells
+            // This is fine, we might just output points.
+        }
+        if ( NX_nodes_surf_input_ < 2 && NY_nodes_surf_input_ < 2 && NR_nodes_rad_input_ < 2 &&
+             ( NX_nodes_surf_input_ + NY_nodes_surf_input_ + NR_nodes_rad_input_ > 3 ) )
+        {
+            // This case implies more than one point, but not enough to form a cell.
+            // E.g., 1x1xN where N>1 (line of points). VTK handles this.
+        }
+
+        // 3. Calculate OUTPUT grid dimensions and total points/cells for header
+        if ( is_quadratic_ )
+        {
+            NX_nodes_surf_output_ =
+                ( NX_nodes_surf_input_ > 1 ) ? ( 2 * ( NX_nodes_surf_input_ - 1 ) + 1 ) : NX_nodes_surf_input_;
+            NY_nodes_surf_output_ =
+                ( NY_nodes_surf_input_ > 1 ) ? ( 2 * ( NY_nodes_surf_input_ - 1 ) + 1 ) : NY_nodes_surf_input_;
+            NR_nodes_rad_output_ =
+                ( NR_nodes_rad_input_ > 1 ) ? ( 2 * ( NR_nodes_rad_input_ - 1 ) + 1 ) : NR_nodes_rad_input_;
+        }
+        else
+        {
+            NX_nodes_surf_output_ = NX_nodes_surf_input_;
+            NY_nodes_surf_output_ = NY_nodes_surf_input_;
+            NR_nodes_rad_output_  = NR_nodes_rad_input_;
+        }
+
+        num_total_points_ = num_subdomains_ * NX_nodes_surf_output_ * NY_nodes_surf_output_ * NR_nodes_rad_output_;
+
+        size_t num_cells_x_surf = ( NX_nodes_surf_input_ > 1 ) ? NX_nodes_surf_input_ - 1 : 0;
+        size_t num_cells_y_surf = ( NY_nodes_surf_input_ > 1 ) ? NY_nodes_surf_input_ - 1 : 0;
+        size_t num_cells_r_rad  = ( NR_nodes_rad_input_ > 1 ) ? NR_nodes_rad_input_ - 1 : 0;
+        num_total_cells_        = num_subdomains_ * num_cells_x_surf * num_cells_y_surf * num_cells_r_rad;
+    }
+
+    template < class ScalarFieldViewDevice >
+    void add_scalar_field( const std::string& field_name, const ScalarFieldViewDevice& field_data_view_device )
+    {
+        if ( field_data_view_device.rank() != 4 )
+        {
+            throw std::runtime_error( "Scalar field data view must have rank 4: (sd, x_in, y_in, r_in)." );
+        }
+        validate_field_view_dimensions_for_input_grid( field_data_view_device, field_name );
+
+        // Create a host mirror and store it.
+        ScalarFieldHostView h_field_data_input =
+            Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace(), field_data_view_device );
+
+        PointDataEntry entry;
+        entry.name                 = field_name;
+        entry.num_components       = 1;
+        entry.data_type_str        = "Float32";
+        entry.host_view_input_data = h_field_data_input;
+        point_data_entries_.push_back( std::move( entry ) );
+    }
+
+    template < class VectorFieldViewDevice >
+    void add_vector_field( const std::string& field_name, const VectorFieldViewDevice& field_data_view_device )
+    {
+        if ( field_data_view_device.rank() != 5 )
+        { // sd, x_in, y_in, r_in, comp
+            throw std::runtime_error( "Vector field data view must have rank 5." );
+        }
+        int num_vec_components = field_data_view_device.extent( 4 );
+        if ( num_vec_components <= 0 )
+        {
+            throw std::runtime_error( "Vector field must have at least one component." );
+        }
+        validate_field_view_dimensions_for_input_grid( field_data_view_device, field_name );
+
+        VectorFieldHostView h_field_data_input =
+            Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace(), field_data_view_device );
+
+        PointDataEntry entry;
+        entry.name                 = field_name;
+        entry.num_components       = num_vec_components;
+        entry.data_type_str        = "Float32";
+        entry.host_view_input_data = h_field_data_input;
+        point_data_entries_.push_back( std::move( entry ) );
+    }
+
+    void write()
+    {
+        std::ofstream vtk_file( output_path_ );
+        if ( !vtk_file.is_open() )
+        {
+            throw std::runtime_error( "Failed to open VTK output file: " + output_path_ );
+        }
+        vtk_file << std::fixed << std::setprecision( 8 );
+
+        vtk_file << "<VTKFile type=\"UnstructuredGrid\" version=\"1.0\" byte_order=\"LittleEndian\">\n";
+        vtk_file << "  <UnstructuredGrid>\n";
+        vtk_file << "    <Piece NumberOfPoints=\"" << num_total_points_ << "\" NumberOfCells=\"" << num_total_cells_
+                 << "\">\n";
+
+        // --- Points ---
+        vtk_file << "      <Points>\n";
+        vtk_file
+            << "        <DataArray type=\"Float32\" Name=\"Coordinates\" NumberOfComponents=\"3\" format=\"ascii\">\n";
+        write_points_data( vtk_file );
+        vtk_file << "        </DataArray>\n";
+        vtk_file << "      </Points>\n";
+
+        // --- Cells ---
+        if ( num_total_cells_ > 0 )
+        { // Only write cell data if there are cells
+            vtk_file << "      <Cells>\n";
+            vtk_file << "        <DataArray type=\"Int64\" Name=\"connectivity\" format=\"ascii\">\n";
+            write_cell_connectivity_data( vtk_file );
+            vtk_file << "        </DataArray>\n";
+            vtk_file << "        <DataArray type=\"Int64\" Name=\"offsets\" format=\"ascii\">\n";
+            write_cell_offsets_data( vtk_file );
+            vtk_file << "        </DataArray>\n";
+            vtk_file << "        <DataArray type=\"UInt8\" Name=\"types\" format=\"ascii\">\n";
+            write_cell_types_data( vtk_file );
+            vtk_file << "        </DataArray>\n";
+            vtk_file << "      </Cells>\n";
+        }
+
+        // --- PointData ---
+        if ( !point_data_entries_.empty() && num_total_points_ > 0 )
+        {
+            vtk_file << "      <PointData>\n";
+            for ( const auto& entry : point_data_entries_ )
+            {
+                vtk_file << "        <DataArray type=\"" << entry.data_type_str << "\" Name=\"" << entry.name << "\"";
+                if ( entry.num_components > 1 )
+                {
+                    vtk_file << " NumberOfComponents=\"" << entry.num_components << "\"";
+                }
+                vtk_file << " format=\"ascii\">\n";
+                write_field_data( vtk_file, entry );
+                vtk_file << "        </DataArray>\n";
+            }
+            vtk_file << "      </PointData>\n";
+        }
+
+        vtk_file << "    </Piece>\n";
+        vtk_file << "  </UnstructuredGrid>\n";
+        vtk_file << "</VTKFile>\n";
+
+        vtk_file.close();
+        std::cout << "VTK file written to: " << output_path_ << std::endl;
+    }
+
+  private:
+    struct PointDataEntry
+    {
+        std::string name;
+        // Store the host-mirrored INPUT grid data view directly
+        std::variant< ScalarFieldHostView, VectorFieldHostView > host_view_input_data;
+        int                                                      num_components;
+        std::string                                              data_type_str;
+    };
+
+    // --- Helper: Get Global Output Node ID --- (same as before)
+    size_t get_global_output_node_id( size_t sd_idx, size_t ix_out, size_t iy_out, size_t ir_out ) const
+    {
+        size_t nodes_per_surf_layer_output = NX_nodes_surf_output_ * NY_nodes_surf_output_;
+        size_t nodes_per_subdomain_output  = nodes_per_surf_layer_output * NR_nodes_rad_output_;
+        size_t base_offset_sd              = sd_idx * nodes_per_subdomain_output;
+        size_t offset_in_sd = ir_out * nodes_per_surf_layer_output + iy_out * NX_nodes_surf_output_ + ix_out;
+        return base_offset_sd + offset_in_sd;
+    }
+
+    // --- Helper: Validate Field View Dimensions --- (same as before)
+    template < class FieldView >
+    void validate_field_view_dimensions_for_input_grid( const FieldView& view, const std::string& field_name )
+    {
+        if ( view.extent( 0 ) != num_subdomains_ )
+            throw std::runtime_error( "Field '" + field_name + "' sd mismatch." );
+        if ( view.extent( 1 ) != NX_nodes_surf_input_ )
+            throw std::runtime_error( "Field '" + field_name + "' X_in mismatch." );
+        if ( view.extent( 2 ) != NY_nodes_surf_input_ )
+            throw std::runtime_error( "Field '" + field_name + "' Y_in mismatch." );
+        if ( view.extent( 3 ) != NR_nodes_rad_input_ )
+            throw std::runtime_error( "Field '" + field_name + "' R_in mismatch." );
+    }
+
+    // --- Helper: Write Points Data ---
+    void write_points_data( std::ostream& os )
+    {
+        for ( size_t sd = 0; sd < num_subdomains_; ++sd )
+        {
+            for ( size_t ir_out = 0; ir_out < NR_nodes_rad_output_; ++ir_out )
+            {
+                for ( size_t iy_out = 0; iy_out < NY_nodes_surf_output_; ++iy_out )
+                {
+                    for ( size_t ix_out = 0; ix_out < NX_nodes_surf_output_; ++ix_out )
+                    {
+                        double final_px, final_py, final_pz;
+                        get_interpolated_point_coordinates( sd, ix_out, iy_out, ir_out, final_px, final_py, final_pz );
+                        os << "          " << static_cast< float >( final_px ) << " "
+                           << static_cast< float >( final_py ) << " " << static_cast< float >( final_pz ) << "\n";
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Helper: Get Interpolated Point Coordinates ---
+    void get_interpolated_point_coordinates(
+        size_t  sd,
+        size_t  ix_out,
+        size_t  iy_out,
+        size_t  ir_out,
+        double& final_px,
+        double& final_py,
+        double& final_pz ) const
+    {
+        if ( !is_quadratic_ || ( NX_nodes_surf_input_ <= 1 && NY_nodes_surf_input_ <= 1 && NR_nodes_rad_input_ <= 1 ) )
+        { // Single point case
+            size_t ix_in = ix_out;
+            size_t iy_in = iy_out;
+            size_t ir_in = ir_out;
+            // Ensure indices are valid for non-interpolated case, should be 0 if input dim is 1
+            if ( NX_nodes_surf_input_ == 1 )
+                ix_in = 0;
+            if ( NY_nodes_surf_input_ == 1 )
+                iy_in = 0;
+            if ( NR_nodes_rad_input_ == 1 )
+                ir_in = 0;
+
+            double radius = h_radii_managed_( sd, ir_in );
+            final_px      = h_shell_coords_managed_( sd, ix_in, iy_in, 0 ) * radius;
+            final_py      = h_shell_coords_managed_( sd, ix_in, iy_in, 1 ) * radius;
+            final_pz      = h_shell_coords_managed_( sd, ix_in, iy_in, 2 ) * radius;
+        }
+        else
+        {
+            size_t ix_in0 = ix_out / 2;
+            size_t iy_in0 = iy_out / 2;
+            size_t ir_in0 = ir_out / 2;
+
+            double base_x_sum = 0.0, base_y_sum = 0.0, base_z_sum = 0.0;
+            double W_shell_sum = 0.0;
+
+            double wx_param = ( NX_nodes_surf_input_ > 1 ) ? ( ix_out % 2 ) * 0.5 : 0.0;
+            double wy_param = ( NY_nodes_surf_input_ > 1 ) ? ( iy_out % 2 ) * 0.5 : 0.0;
+
+            for ( int j_off = 0; j_off <= ( ( wy_param > 0.0 && iy_in0 + 1 < NY_nodes_surf_input_ ) ? 1 : 0 ); ++j_off )
+            {
+                size_t iy_in = iy_in0 + j_off;
+                double W_j   = ( j_off == 0 ) ? ( 1.0 - wy_param ) : wy_param;
+                for ( int i_off = 0; i_off <= ( ( wx_param > 0.0 && ix_in0 + 1 < NX_nodes_surf_input_ ) ? 1 : 0 );
+                      ++i_off )
+                {
+                    size_t ix_in = ix_in0 + i_off;
+                    double W_i   = ( i_off == 0 ) ? ( 1.0 - wx_param ) : wx_param;
+
+                    double shell_w = W_i * W_j;
+                    base_x_sum += shell_w * h_shell_coords_managed_( sd, ix_in, iy_in, 0 );
+                    base_y_sum += shell_w * h_shell_coords_managed_( sd, ix_in, iy_in, 1 );
+                    base_z_sum += shell_w * h_shell_coords_managed_( sd, ix_in, iy_in, 2 );
+                    W_shell_sum += shell_w;
+                }
+            }
+            // Handle case where denominator might be zero (e.g. single input node line)
+            double unit_px =
+                ( W_shell_sum > 1e-9 ) ?
+                    base_x_sum / W_shell_sum :
+                    h_shell_coords_managed_(
+                        sd, ( NX_nodes_surf_input_ > 1 ? ix_in0 : 0 ), ( NY_nodes_surf_input_ > 1 ? iy_in0 : 0 ), 0 );
+            double unit_py =
+                ( W_shell_sum > 1e-9 ) ?
+                    base_y_sum / W_shell_sum :
+                    h_shell_coords_managed_(
+                        sd, ( NX_nodes_surf_input_ > 1 ? ix_in0 : 0 ), ( NY_nodes_surf_input_ > 1 ? iy_in0 : 0 ), 1 );
+            double unit_pz =
+                ( W_shell_sum > 1e-9 ) ?
+                    base_z_sum / W_shell_sum :
+                    h_shell_coords_managed_(
+                        sd, ( NX_nodes_surf_input_ > 1 ? ix_in0 : 0 ), ( NY_nodes_surf_input_ > 1 ? iy_in0 : 0 ), 2 );
+
+            double radius_sum   = 0.0;
+            double W_radius_sum = 0.0;
+            double wr_param     = ( NR_nodes_rad_input_ > 1 ) ? ( ir_out % 2 ) * 0.5 : 0.0;
+
+            for ( int k_off = 0; k_off <= ( ( wr_param > 0.0 && ir_in0 + 1 < NR_nodes_rad_input_ ) ? 1 : 0 ); ++k_off )
+            {
+                size_t ir_in = ir_in0 + k_off;
+                double R_k   = ( k_off == 0 ) ? ( 1.0 - wr_param ) : wr_param;
+                radius_sum += R_k * h_radii_managed_( sd, ir_in );
+                W_radius_sum += R_k;
+            }
+            double current_radius = ( W_radius_sum > 1e-9 ) ?
+                                        radius_sum / W_radius_sum :
+                                        h_radii_managed_( sd, ( NR_nodes_rad_input_ > 1 ? ir_in0 : 0 ) );
+
+            final_px = unit_px * current_radius;
+            final_py = unit_py * current_radius;
+            final_pz = unit_pz * current_radius;
+        }
+    }
+
+    // --- Helper: Write Cell Connectivity Data ---
+    void write_cell_connectivity_data( std::ostream& os )
+    {
+        if ( num_total_cells_ == 0 )
+            return;
+        size_t nodes_per_cell_out = is_quadratic_ ? 20 : 8;
+
+        size_t num_cells_x_surf = ( NX_nodes_surf_input_ > 1 ) ? NX_nodes_surf_input_ - 1 : 0;
+        size_t num_cells_y_surf = ( NY_nodes_surf_input_ > 1 ) ? NY_nodes_surf_input_ - 1 : 0;
+        size_t num_cells_r_rad  = ( NR_nodes_rad_input_ > 1 ) ? NR_nodes_rad_input_ - 1 : 0;
+
+        for ( size_t sd = 0; sd < num_subdomains_; ++sd )
+        {
+            for ( size_t k_cell_in = 0; k_cell_in < num_cells_r_rad; ++k_cell_in )
+            {
+                for ( size_t j_cell_in = 0; j_cell_in < num_cells_y_surf; ++j_cell_in )
+                {
+                    for ( size_t i_cell_in = 0; i_cell_in < num_cells_x_surf; ++i_cell_in )
+                    {
+                        // ... (same logic as before to get cell_node_ids for one cell) ...
+                        std::vector< size_t > cell_node_ids( nodes_per_cell_out );
+                        if ( is_quadratic_ )
+                        {
+                            size_t ix0_out = i_cell_in * 2;
+                            size_t ix1_out = ix0_out + 1;
+                            size_t ix2_out = ix0_out + 2;
+                            size_t iy0_out = j_cell_in * 2;
+                            size_t iy1_out = iy0_out + 1;
+                            size_t iy2_out = iy0_out + 2;
+                            size_t ir0_out = k_cell_in * 2;
+                            size_t ir1_out = ir0_out + 1;
+                            size_t ir2_out = ir0_out + 2;
+
+                            cell_node_ids[0]  = get_global_output_node_id( sd, ix0_out, iy0_out, ir0_out );
+                            cell_node_ids[1]  = get_global_output_node_id( sd, ix2_out, iy0_out, ir0_out );
+                            cell_node_ids[2]  = get_global_output_node_id( sd, ix2_out, iy2_out, ir0_out );
+                            cell_node_ids[3]  = get_global_output_node_id( sd, ix0_out, iy2_out, ir0_out );
+                            cell_node_ids[4]  = get_global_output_node_id( sd, ix0_out, iy0_out, ir2_out );
+                            cell_node_ids[5]  = get_global_output_node_id( sd, ix2_out, iy0_out, ir2_out );
+                            cell_node_ids[6]  = get_global_output_node_id( sd, ix2_out, iy2_out, ir2_out );
+                            cell_node_ids[7]  = get_global_output_node_id( sd, ix0_out, iy2_out, ir2_out );
+                            cell_node_ids[8]  = get_global_output_node_id( sd, ix1_out, iy0_out, ir0_out );
+                            cell_node_ids[9]  = get_global_output_node_id( sd, ix2_out, iy1_out, ir0_out );
+                            cell_node_ids[10] = get_global_output_node_id( sd, ix1_out, iy2_out, ir0_out );
+                            cell_node_ids[11] = get_global_output_node_id( sd, ix0_out, iy1_out, ir0_out );
+                            cell_node_ids[12] = get_global_output_node_id( sd, ix1_out, iy0_out, ir2_out );
+                            cell_node_ids[13] = get_global_output_node_id( sd, ix2_out, iy1_out, ir2_out );
+                            cell_node_ids[14] = get_global_output_node_id( sd, ix1_out, iy2_out, ir2_out );
+                            cell_node_ids[15] = get_global_output_node_id( sd, ix0_out, iy1_out, ir2_out );
+                            cell_node_ids[16] = get_global_output_node_id( sd, ix0_out, iy0_out, ir1_out );
+                            cell_node_ids[17] = get_global_output_node_id( sd, ix2_out, iy0_out, ir1_out );
+                            cell_node_ids[18] = get_global_output_node_id( sd, ix2_out, iy2_out, ir1_out );
+                            cell_node_ids[19] = get_global_output_node_id( sd, ix0_out, iy2_out, ir1_out );
+                        }
+                        else
+                        {
+                            size_t ix0_out   = i_cell_in;
+                            size_t ix1_out   = i_cell_in + 1;
+                            size_t iy0_out   = j_cell_in;
+                            size_t iy1_out   = j_cell_in + 1;
+                            size_t ir0_out   = k_cell_in;
+                            size_t ir1_out   = k_cell_in + 1;
+                            cell_node_ids[0] = get_global_output_node_id( sd, ix0_out, iy0_out, ir0_out );
+                            cell_node_ids[1] = get_global_output_node_id( sd, ix1_out, iy0_out, ir0_out );
+                            cell_node_ids[2] = get_global_output_node_id( sd, ix1_out, iy1_out, ir0_out );
+                            cell_node_ids[3] = get_global_output_node_id( sd, ix0_out, iy1_out, ir0_out );
+                            cell_node_ids[4] = get_global_output_node_id( sd, ix0_out, iy0_out, ir1_out );
+                            cell_node_ids[5] = get_global_output_node_id( sd, ix1_out, iy0_out, ir1_out );
+                            cell_node_ids[6] = get_global_output_node_id( sd, ix1_out, iy1_out, ir1_out );
+                            cell_node_ids[7] = get_global_output_node_id( sd, ix0_out, iy1_out, ir1_out );
+                        }
+                        os << "          ";
+                        for ( size_t i = 0; i < nodes_per_cell_out; ++i )
+                        {
+                            os << cell_node_ids[i] << ( i == nodes_per_cell_out - 1 ? "" : " " );
+                        }
+                        os << "\n";
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Helper: Write Cell Offsets Data ---
+    void write_cell_offsets_data( std::ostream& os )
+    {
+        if ( num_total_cells_ == 0 )
+            return;
+        size_t  nodes_per_cell_out = is_quadratic_ ? 20 : 8;
+        int64_t current_offset     = 0;
+        for ( size_t i = 0; i < num_total_cells_; ++i )
+        {
+            current_offset += nodes_per_cell_out;
+            os << "          " << current_offset << "\n";
+        }
+    }
+
+    // --- Helper: Write Cell Types Data ---
+    void write_cell_types_data( std::ostream& os )
+    {
+        if ( num_total_cells_ == 0 )
+            return;
+        uint8_t cell_type_out = is_quadratic_ ? 25 : 12;
+        for ( size_t i = 0; i < num_total_cells_; ++i )
+        {
+            os << "          " << static_cast< int >( cell_type_out ) << "\n";
+        }
+    }
+
+    // --- Helper: Interpolate and Write Field Data ---
+    // Templated on the actual stored view type within the variant
+    template < typename InputFieldViewType >
+    void get_interpolated_field_value_at_output_node(
+        const InputFieldViewType& h_field_data_input,
+        size_t                    sd,
+        size_t                    ix_out,
+        size_t                    iy_out,
+        size_t                    ir_out,
+        int                       num_components,
+        std::vector< double >&    interpolated_values ) const
+    {
+        interpolated_values.assign( num_components, 0.0 );
+
+        bool use_direct_mapping =
+            !is_quadratic_ || ( NX_nodes_surf_input_ <= 1 && NY_nodes_surf_input_ <= 1 && NR_nodes_rad_input_ <= 1 );
+
+        if ( use_direct_mapping )
+        {
+            size_t ix_in = ix_out;
+            size_t iy_in = iy_out;
+            size_t ir_in = ir_out;
+            if ( NX_nodes_surf_input_ == 1 )
+                ix_in = 0;
+            if ( NY_nodes_surf_input_ == 1 )
+                iy_in = 0;
+            if ( NR_nodes_rad_input_ == 1 )
+                ir_in = 0;
+
+            if constexpr ( std::is_same_v< InputFieldViewType, grid::Grid4DDataScalar< double > > )
+            { // Scalar
+                interpolated_values[0] = h_field_data_input( sd, ix_in, iy_in, ir_in );
+            }
+            else
+            { // Vector
+                for ( int comp = 0; comp < num_components; ++comp )
+                {
+                    interpolated_values[comp] = h_field_data_input( sd, ix_in, iy_in, ir_in, comp );
+                }
+            }
+        }
+        else
+        {
+            size_t ix_in0 = ix_out / 2;
+            size_t iy_in0 = iy_out / 2;
+            size_t ir_in0 = ir_out / 2;
+
+            std::vector< double > val_sum( num_components, 0.0 );
+            double                W_sum = 0.0;
+
+            double wx_param = ( NX_nodes_surf_input_ > 1 ) ? ( ix_out % 2 ) * 0.5 : 0.0;
+            double wy_param = ( NY_nodes_surf_input_ > 1 ) ? ( iy_out % 2 ) * 0.5 : 0.0;
+            double wr_param = ( NR_nodes_rad_input_ > 1 ) ? ( ir_out % 2 ) * 0.5 : 0.0;
+
+            for ( int k_off = 0; k_off <= ( ( wr_param > 0.0 && ir_in0 + 1 < NR_nodes_rad_input_ ) ? 1 : 0 ); ++k_off )
+            {
+                size_t ir_in = ir_in0 + k_off;
+                double R_k   = ( k_off == 0 ) ? ( 1.0 - wr_param ) : wr_param;
+                for ( int j_off = 0; j_off <= ( ( wy_param > 0.0 && iy_in0 + 1 < NY_nodes_surf_input_ ) ? 1 : 0 );
+                      ++j_off )
+                {
+                    size_t iy_in = iy_in0 + j_off;
+                    double W_j   = ( j_off == 0 ) ? ( 1.0 - wy_param ) : wy_param;
+                    for ( int i_off = 0; i_off <= ( ( wx_param > 0.0 && ix_in0 + 1 < NX_nodes_surf_input_ ) ? 1 : 0 );
+                          ++i_off )
+                    {
+                        size_t ix_in = ix_in0 + i_off;
+                        double W_i   = ( i_off == 0 ) ? ( 1.0 - wx_param ) : wx_param;
+
+                        double weight = W_i * W_j * R_k;
+                        if constexpr ( std::is_same_v< InputFieldViewType, grid::Grid4DDataScalar< double > > )
+                        { // Scalar
+                            val_sum[0] += weight * h_field_data_input( sd, ix_in, iy_in, ir_in );
+                        }
+                        else
+                        { // Vector
+                            for ( int comp = 0; comp < num_components; ++comp )
+                            {
+                                val_sum[comp] += weight * h_field_data_input( sd, ix_in, iy_in, ir_in, comp );
+                            }
+                        }
+                        W_sum += weight;
+                    }
+                }
+            }
+
+            if ( W_sum > 1e-9 )
+            {
+                for ( int comp = 0; comp < num_components; ++comp )
+                {
+                    interpolated_values[comp] = val_sum[comp] / W_sum;
+                }
+            }
+            else
+            { // Original node or not enough points to interpolate from
+                if constexpr ( std::is_same_v< InputFieldViewType, grid::Grid4DDataScalar< double > > )
+                {
+                    interpolated_values[0] = h_field_data_input(
+                        sd,
+                        ( NX_nodes_surf_input_ > 1 ? ix_in0 : 0 ),
+                        ( NY_nodes_surf_input_ > 1 ? iy_in0 : 0 ),
+                        ( NR_nodes_rad_input_ > 1 ? ir_in0 : 0 ) );
+                }
+                else
+                {
+                    for ( int comp = 0; comp < num_components; ++comp )
+                    {
+                        interpolated_values[comp] = h_field_data_input(
+                            sd,
+                            ( NX_nodes_surf_input_ > 1 ? ix_in0 : 0 ),
+                            ( NY_nodes_surf_input_ > 1 ? iy_in0 : 0 ),
+                            ( NR_nodes_rad_input_ > 1 ? ir_in0 : 0 ),
+                            comp );
+                    }
+                }
+            }
+        }
+    }
+
+    void write_field_data( std::ostream& os, const PointDataEntry& entry )
+    {
+        std::vector< double > interpolated_values_buffer( entry.num_components );
+        for ( size_t sd = 0; sd < num_subdomains_; ++sd )
+        {
+            for ( size_t ir_out = 0; ir_out < NR_nodes_rad_output_; ++ir_out )
+            {
+                for ( size_t iy_out = 0; iy_out < NY_nodes_surf_output_; ++iy_out )
+                {
+                    for ( size_t ix_out = 0; ix_out < NX_nodes_surf_output_; ++ix_out )
+                    {
+                        // Use std::visit to call the interpolation helper with the correct view type
+                        std::visit(
+                            [&]( const auto& view_arg ) {
+                                this->get_interpolated_field_value_at_output_node(
+                                    view_arg,
+                                    sd,
+                                    ix_out,
+                                    iy_out,
+                                    ir_out,
+                                    entry.num_components,
+                                    interpolated_values_buffer );
+                            },
+                            entry.host_view_input_data );
+
+                        os << "          ";
+                        for ( int comp = 0; comp < entry.num_components; ++comp )
+                        {
+                            os << static_cast< float >( interpolated_values_buffer[comp] )
+                               << ( comp == entry.num_components - 1 ? "" : " " );
+                        }
+                        os << "\n";
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Member Variables ---
+    std::string output_path_;
+    bool        is_quadratic_;
+
+    Kokkos::View< double*** [3], Kokkos::LayoutRight, Kokkos::HostSpace > h_shell_coords_managed_;
+    Kokkos::View< double**, Kokkos::LayoutRight, Kokkos::HostSpace >      h_radii_managed_;
+
+    size_t num_subdomains_;
+    size_t NX_nodes_surf_input_, NY_nodes_surf_input_, NR_nodes_rad_input_;
+    size_t NX_nodes_surf_output_, NY_nodes_surf_output_, NR_nodes_rad_output_;
+
+    size_t num_total_points_;
+    size_t num_total_cells_;
+
+    std::vector< PointDataEntry > point_data_entries_;
+};
+
 } // namespace terra::vtk

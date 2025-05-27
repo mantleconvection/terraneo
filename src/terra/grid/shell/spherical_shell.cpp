@@ -1,9 +1,29 @@
 
 #include "spherical_shell.hpp"
 
-#include "../point_3d.hpp"
+#include "../../point_3d.hpp"
 
-namespace terra::grid {
+namespace terra::grid::shell {
+
+std::vector< double > uniform_shell_radii( const double r_min, const double r_max, const int num_shells )
+{
+    if ( num_shells < 2 )
+    {
+        throw std::runtime_error( "Number of shells must be at least 2." );
+    }
+    std::vector< double > radii;
+    radii.reserve( num_shells );
+    const double r_step = ( r_max - r_min ) / ( num_shells - 1 );
+    for ( int i = 0; i < num_shells; ++i )
+    {
+        radii.push_back( r_min + i * r_step );
+    }
+
+    // Set boundary exactly.
+    radii[num_shells - 1] = r_max;
+
+    return radii;
+}
 
 // Struct to hold the coordinates of the four base corners
 // and the number of intervals N = ntan - 1.
@@ -156,6 +176,7 @@ static Point3D compute_node_recursive( int i, int j, const BaseCorners& corners,
 /**
  * @brief Generates coordinates for a rectangular subdomain of the refined spherical grid.
  *
+ * @param subdomain_coords_host a properly sized host-allocated view that is filled with the coordinates of the points
  * @param corners Struct containing the base corner points and N = ntan - 1.
  * @param i_start_incl Starting row index (inclusive) of the subdomain (global index).
  * @param i_end_incl Ending row index (inclusive) of the subdomain (global index).
@@ -164,8 +185,13 @@ static Point3D compute_node_recursive( int i, int j, const BaseCorners& corners,
  * @return Kokkos::View<double**[3], Kokkos::HostSpace> Host view containing coordinates
  *         for the subdomain. Dimensions are ((i_end_incl - 1) - i_start, (j_end_incl - 1) - j_start).
  */
-Grid2DDataVec< double, 3 >
-    compute_subdomain( const BaseCorners& corners, int i_start_incl, int i_end_incl, int j_start_incl, int j_end_incl )
+void compute_subdomain(
+    const Grid2DDataVec< double, 3 >& subdomain_coords_host,
+    const BaseCorners&                corners,
+    int                               i_start_incl,
+    int                               i_end_incl,
+    int                               j_start_incl,
+    int                               j_end_incl )
 {
     const int i_start = i_start_incl;
     const int j_start = j_start_incl;
@@ -188,7 +214,10 @@ Grid2DDataVec< double, 3 >
     const size_t subdomain_rows = i_end - i_start;
     const size_t subdomain_cols = j_end - j_start;
 
-    Grid2DDataVec< double, 3 > subdomain_coords( "subdomain_coords", subdomain_rows, subdomain_cols );
+    if ( subdomain_coords_host.extent( 0 ) != subdomain_rows || subdomain_coords_host.extent( 1 ) != subdomain_cols )
+    {
+        throw std::runtime_error( "Invalid subdomain dimensions in compute_subdomain()." );
+    }
 
     MemoizationCache cache; // Each subdomain computation gets its own cache
 
@@ -201,23 +230,21 @@ Grid2DDataVec< double, 3 >
             Point3D coords = compute_node_recursive( i, j, corners, cache ); // Pass corners struct
 
             // Store in the subdomain view (adjusting indices)
-            subdomain_coords( i - i_start, j - j_start, 0 ) = coords.x();
-            subdomain_coords( i - i_start, j - j_start, 1 ) = coords.y();
-            subdomain_coords( i - i_start, j - j_start, 2 ) = coords.z();
+            subdomain_coords_host( i - i_start, j - j_start, 0 ) = coords.x();
+            subdomain_coords_host( i - i_start, j - j_start, 1 ) = coords.y();
+            subdomain_coords_host( i - i_start, j - j_start, 2 ) = coords.z();
         }
     }
-
-    // std::cout << "Computed " << cache.size() << " unique nodes for subdomain." << std::endl;
-    return subdomain_coords;
 }
 
-static Grid2DDataVec< double, 3 > unit_sphere_single_shell_subdomain_coords(
-    int diamond_id,
-    int ntan,
-    int i_start_incl,
-    int i_end_incl,
-    int j_start_incl,
-    int j_end_incl )
+static void unit_sphere_single_shell_subdomain_coords(
+    const Grid2DDataVec< double, 3 >& subdomain_coords_host,
+    int                               diamond_id,
+    int                               ntan,
+    int                               i_start_incl,
+    int                               i_end_incl,
+    int                               j_start_incl,
+    int                               j_end_incl )
 {
     // Coordinates of the twelve icosahedral nodes of the base grid
     real_t i_node[12][3];
@@ -345,15 +372,16 @@ static Grid2DDataVec< double, 3 > unit_sphere_single_shell_subdomain_coords(
         corners.p0N( i ) = i_node[d_node[diamond_id][R]][i];
     }
 
-    return compute_subdomain( corners, i_start_incl, i_end_incl, j_start_incl, j_end_incl );
+    return compute_subdomain( subdomain_coords_host, corners, i_start_incl, i_end_incl, j_start_incl, j_end_incl );
 }
 
-Grid2DDataVec< double, 3 > unit_sphere_single_shell_subdomain_coords(
-    int diamond_id,
-    int global_refinements,
-    int num_subdomains_per_side,
-    int subdomain_i,
-    int subdomain_j )
+static void unit_sphere_single_shell_subdomain_coords(
+    const Grid2DDataVec< double, 3 >& subdomain_coords_host,
+    int                               diamond_id,
+    int                               global_refinements,
+    int                               num_subdomains_per_side,
+    int                               subdomain_i,
+    int                               subdomain_j )
 {
     const auto elements_per_side = 1 << global_refinements;
     const auto ntan              = elements_per_side + 1;
@@ -370,7 +398,64 @@ Grid2DDataVec< double, 3 > unit_sphere_single_shell_subdomain_coords(
     const auto end_i = start_i + elements_in_subdomain_i;
     const auto end_j = start_j + elements_in_subdomain_j;
 
-    return unit_sphere_single_shell_subdomain_coords( diamond_id, ntan, start_i, end_i, start_j, end_j );
+    unit_sphere_single_shell_subdomain_coords(
+        subdomain_coords_host, diamond_id, ntan, start_i, end_i, start_j, end_j );
 }
 
-} // namespace terra
+Grid3DDataVec< double, 3 > subdomain_unit_sphere_single_shell_coords(
+    const DomainInfo&                   domain_info,
+    const std::vector< SubdomainInfo >& subdomain_infos )
+{
+    Grid3DDataVec< double, 3 > subdomain_coords(
+        "subdomain_unit_sphere_coords",
+        subdomain_infos.size(),
+        domain_info.subdomain_num_nodes_per_side_laterally(),
+        domain_info.subdomain_num_nodes_per_side_laterally() );
+
+    auto subdomain_coords_host = Kokkos::create_mirror_view( subdomain_coords );
+
+    for ( int i = 0; i < subdomain_infos.size(); ++i )
+    {
+        auto single_subdomain_coords_host =
+            Kokkos::subview( subdomain_coords_host, i, Kokkos::ALL(), Kokkos::ALL(), Kokkos::ALL() );
+
+        unit_sphere_single_shell_subdomain_coords(
+            single_subdomain_coords_host,
+            subdomain_infos[i].diamond_id(),
+            domain_info.global_lateral_refinement_level(),
+            domain_info.num_subdomains_per_diamond_side(),
+            subdomain_infos[i].subdomain_x(),
+            subdomain_infos[i].subdomain_y() );
+    }
+
+    Kokkos::deep_copy( subdomain_coords, subdomain_coords_host );
+    return subdomain_coords;
+}
+
+Grid2DDataScalar< double >
+    subdomain_shell_radii( const DomainInfo& domain_info, const std::vector< SubdomainInfo >& subdomain_infos )
+{
+    const int shells_per_subdomain = domain_info.subdomain_num_nodes_radially();
+    const int layers_per_subdomain = shells_per_subdomain - 1;
+
+    Grid2DDataScalar< double > radii_device( "subdomain_shell_radii", subdomain_infos.size(), shells_per_subdomain );
+    auto                       radii_host = Kokkos::create_mirror_view( radii_device );
+
+    for ( int i = 0; i < subdomain_infos.size(); ++i )
+    {
+        const int subdomain_innermost_node_idx = subdomain_infos[i].subdomain_r() * layers_per_subdomain;
+        const int subdomain_outermost_node_idx = subdomain_innermost_node_idx + layers_per_subdomain;
+
+        int j = 0;
+        for ( int node_idx = subdomain_innermost_node_idx; node_idx <= subdomain_outermost_node_idx; node_idx++ )
+        {
+            radii_host( i, j ) = domain_info.radii()[node_idx];
+            j++;
+        }
+    }
+
+    Kokkos::deep_copy( radii_device, radii_host );
+    return radii_device;
+}
+
+} // namespace terra::grid::shell
