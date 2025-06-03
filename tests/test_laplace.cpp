@@ -623,7 +623,7 @@ void all_diamonds()
 
     **/
 
-    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 3, 3, 0.5, 1.0 );
+    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 5, 5, 0.5, 1.0 );
 
     const auto u        = grid::shell::allocate_scalar_grid( "u", domain );
     const auto g        = grid::shell::allocate_scalar_grid( "g", domain );
@@ -633,6 +633,9 @@ void all_diamonds()
     const auto error    = grid::shell::allocate_scalar_grid( "error", domain );
     const auto b        = grid::shell::allocate_scalar_grid( "b", domain );
     const auto r        = grid::shell::allocate_scalar_grid( "r", domain );
+
+    const int num_dofs = u.span();
+    std::cout << "Num DoFs: " << num_dofs << std::endl;
 
     communication::SubdomainNeighborhoodSendBuffer send_buffers( domain );
     communication::SubdomainNeighborhoodRecvBuffer recv_buffers( domain );
@@ -686,7 +689,12 @@ void all_diamonds()
 
     const double omega = 0.3;
 
-    for ( int iter = 0; iter < 1000; iter++ )
+    double duration_matvec_sum = 0;
+    double duration_iter_sum   = 0;
+
+    const int iterations = 200;
+
+    for ( int iter = 0; iter < iterations; iter++ )
     {
         if ( iter % 100 == 0 )
         {
@@ -718,13 +726,20 @@ void all_diamonds()
             std::cout << std::endl;
         }
 
+        Kokkos::Timer timer;
+
+        timer.reset();
+
         // We need that in matvec - maybe resolved when stencils?
         kernels::common::set_constant( tmp, 0.0 );
 
+        Kokkos::Timer timer_matvec;
+        timer_matvec.reset();
         Kokkos::parallel_for(
             "matvec",
             grid::shell::local_domain_md_range_policy_cells( domain ),
             LaplaceOperator( subdomain_shell_coords, subdomain_radii, u, tmp, true, false ) );
+        duration_matvec_sum += timer_matvec.seconds();
 
         communication::pack_and_send_local_subdomain_boundaries(
             domain, tmp, send_buffers, expected_recvs_requests, expected_recvs_metadata );
@@ -732,7 +747,16 @@ void all_diamonds()
             domain, tmp, recv_buffers, expected_recvs_requests, expected_recvs_metadata );
 
         kernels::common::lincomb( u, 1.0, u, omega, b, -omega, tmp );
+
+        duration_iter_sum += timer.seconds();
     }
+
+    const double avg_iteration_duration   = duration_iter_sum / iterations;
+    const double avg_matvec_duration      = duration_matvec_sum / iterations;
+    const double dofs_per_second_per_iter = num_dofs / avg_iteration_duration;
+    std::cout << "Average iteration duration: " << avg_iteration_duration << " seconds" << std::endl;
+    std::cout << "Average matvec duration:    " << avg_matvec_duration << " seconds" << std::endl;
+    std::cout << "Dofs per second per iteration: " << dofs_per_second_per_iter << std::endl;
 
     kernels::common::lincomb( error, 1.0, u, -1.0, solution );
 
