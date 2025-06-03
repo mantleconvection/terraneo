@@ -1,6 +1,8 @@
 
 #include "spherical_shell.hpp"
 
+#include <ranges>
+
 #include "../../point_3d.hpp"
 
 namespace terra::grid::shell {
@@ -402,54 +404,56 @@ static void unit_sphere_single_shell_subdomain_coords(
         subdomain_coords_host, diamond_id, ntan, start_i, end_i, start_j, end_j );
 }
 
-Grid3DDataVec< double, 3 > subdomain_unit_sphere_single_shell_coords(
-    const DomainInfo&                   domain_info,
-    const std::vector< SubdomainInfo >& subdomain_infos )
+Grid3DDataVec< double, 3 > subdomain_unit_sphere_single_shell_coords( const DistributedDomain& domain )
 {
     Grid3DDataVec< double, 3 > subdomain_coords(
         "subdomain_unit_sphere_coords",
-        subdomain_infos.size(),
-        domain_info.subdomain_num_nodes_per_side_laterally(),
-        domain_info.subdomain_num_nodes_per_side_laterally() );
+        domain.subdomains().size(),
+        domain.domain_info().subdomain_num_nodes_per_side_laterally(),
+        domain.domain_info().subdomain_num_nodes_per_side_laterally() );
 
     auto subdomain_coords_host = Kokkos::create_mirror_view( subdomain_coords );
 
-    for ( int i = 0; i < subdomain_infos.size(); ++i )
+    for ( const auto& [subdomain_info, data] : domain.subdomains() )
     {
+        const auto& [subdomain_idx, neighborhood] = data;
+
         auto single_subdomain_coords_host =
-            Kokkos::subview( subdomain_coords_host, i, Kokkos::ALL(), Kokkos::ALL(), Kokkos::ALL() );
+            Kokkos::subview( subdomain_coords_host, subdomain_idx, Kokkos::ALL(), Kokkos::ALL(), Kokkos::ALL() );
 
         unit_sphere_single_shell_subdomain_coords(
             single_subdomain_coords_host,
-            subdomain_infos[i].diamond_id(),
-            domain_info.global_lateral_refinement_level(),
-            domain_info.num_subdomains_per_diamond_side(),
-            subdomain_infos[i].subdomain_x(),
-            subdomain_infos[i].subdomain_y() );
+            subdomain_info.diamond_id(),
+            domain.domain_info().global_lateral_refinement_level(),
+            domain.domain_info().num_subdomains_per_diamond_side(),
+            subdomain_info.subdomain_x(),
+            subdomain_info.subdomain_y() );
     }
 
     Kokkos::deep_copy( subdomain_coords, subdomain_coords_host );
     return subdomain_coords;
 }
 
-Grid2DDataScalar< double >
-    subdomain_shell_radii( const DomainInfo& domain_info, const std::vector< SubdomainInfo >& subdomain_infos )
+Grid2DDataScalar< double > subdomain_shell_radii( const DistributedDomain& domain )
 {
-    const int shells_per_subdomain = domain_info.subdomain_num_nodes_radially();
+    const int shells_per_subdomain = domain.domain_info().subdomain_num_nodes_radially();
     const int layers_per_subdomain = shells_per_subdomain - 1;
 
-    Grid2DDataScalar< double > radii_device( "subdomain_shell_radii", subdomain_infos.size(), shells_per_subdomain );
-    auto                       radii_host = Kokkos::create_mirror_view( radii_device );
+    Grid2DDataScalar< double > radii_device(
+        "subdomain_shell_radii", domain.subdomains().size(), shells_per_subdomain );
+    auto radii_host = Kokkos::create_mirror_view( radii_device );
 
-    for ( int i = 0; i < subdomain_infos.size(); ++i )
+    for ( const auto& [subdomain_info, data] : domain.subdomains() )
     {
-        const int subdomain_innermost_node_idx = subdomain_infos[i].subdomain_r() * layers_per_subdomain;
+        const auto& [subdomain_idx, neighborhood] = data;
+
+        const int subdomain_innermost_node_idx = subdomain_info.subdomain_r() * layers_per_subdomain;
         const int subdomain_outermost_node_idx = subdomain_innermost_node_idx + layers_per_subdomain;
 
         int j = 0;
         for ( int node_idx = subdomain_innermost_node_idx; node_idx <= subdomain_outermost_node_idx; node_idx++ )
         {
-            radii_host( i, j ) = domain_info.radii()[node_idx];
+            radii_host( subdomain_idx, j ) = domain.domain_info().radii()[node_idx];
             j++;
         }
     }

@@ -3,7 +3,7 @@
 #include <iostream>
 #include <optional>
 
-#include "../src/terra/grid/spherical_shell.hpp"
+#include "../src/terra/grid/shell/spherical_shell.hpp"
 #include "../src/terra/vtk/vtk.hpp"
 #include "terra/point_3d.hpp"
 

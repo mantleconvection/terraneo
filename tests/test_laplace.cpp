@@ -1,115 +1,123 @@
 
 #include <optional>
 
+#include "../src/terra/grid/shell/spherical_shell.hpp"
 #include "../src/terra/kokkos/kokkos_wrapper.hpp"
+#include "communication/communication.hpp"
 #include "dense/mat.hpp"
-#include "grid/spherical_shell.hpp"
 #include "kernels/common/interpolation.hpp"
 #include "kernels/common/vector_operations.hpp"
 #include "terra/grid/grid_types.hpp"
 #include "vtk/vtk.hpp"
 
+#define SINGLE_DIAMOND 0
+
 using namespace terra;
 
+using grid::Grid2DDataScalar;
 using grid::Grid3DDataScalar;
-using grid::ThickSphericalShellSubdomainGrid;
-
-struct TestInterpolator
-{
-    ThickSphericalShellSubdomainGrid grid_;
-    Grid3DDataScalar< double >       data_;
-
-    TestInterpolator( const ThickSphericalShellSubdomainGrid& grid, const Grid3DDataScalar< double >& data )
-    : grid_( grid )
-    , data_( data )
-    {}
-
-    KOKKOS_INLINE_FUNCTION
-    void operator()( const int x, const int y, const int r ) const
-    {
-        const dense::Vec< double, 3 > coords = grid_.coords( x, y, r );
-        const double                  value  = coords( 0 );
-        data_( x, y, r )                     = value;
-    }
-};
+using grid::Grid3DDataVec;
+using grid::Grid4DDataScalar;
+using grid::shell::DistributedDomain;
+using grid::shell::DomainInfo;
+using grid::shell::SubdomainInfo;
 
 struct SolutionInterpolator
 {
-    ThickSphericalShellSubdomainGrid grid_;
-    Grid3DDataScalar< double >       data_;
-    bool                             only_boundary_;
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+    Grid4DDataScalar< double > data_;
+    bool                       only_boundary_;
 
     SolutionInterpolator(
-        const ThickSphericalShellSubdomainGrid& grid,
-        const Grid3DDataScalar< double >&       data,
-        bool                                    only_boundary )
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataScalar< double >& data,
+        bool                              only_boundary )
     : grid_( grid )
+    , radii_( radii )
     , data_( data )
     , only_boundary_( only_boundary )
     {}
 
     KOKKOS_INLINE_FUNCTION
-    void operator()( const int x, const int y, const int r ) const
+    void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
     {
-        const dense::Vec< double, 3 > coords = grid_.coords( x, y, r );
-        const double                  value  = coords( 0 );
+        const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+        const double                  value  = coords( 0 ) * Kokkos::sin( coords( 1 ) ) * Kokkos::cos( coords( 2 ) );
+        // const double value = coords( 0 );
 
-        if ( !only_boundary_ || ( x == 0 || y == 0 || r == 0 || x == grid_.size_x() - 1 || y == grid_.size_y() - 1 ||
-                                  r == grid_.size_r() - 1 ) )
+        if ( !only_boundary_ ||
+#if SINGLE_DIAMOND
+             ( x == 0 || y == 0 || r == 0 || x == grid_.size_x() - 1 || y == grid_.size_y() - 1 ||
+               r == grid_.size_r() - 1 )
+#else
+             ( r == 0 || r == radii_.extent( 1 ) - 1 )
+#endif
+        )
         {
-            data_( x, y, r ) = value;
+            data_( local_subdomain_id, x, y, r ) = value;
         }
     }
 };
 
 struct SetOnBoundary
 {
-    ThickSphericalShellSubdomainGrid grid_;
-    Grid3DDataScalar< double >       src_;
-    Grid3DDataScalar< double >       dst_;
+    Grid4DDataScalar< double > src_;
+    Grid4DDataScalar< double > dst_;
+    int                        num_shells_;
 
-    SetOnBoundary(
-        const ThickSphericalShellSubdomainGrid& grid,
-        const Grid3DDataScalar< double >&       src,
-        const Grid3DDataScalar< double >&       dst )
-    : grid_( grid )
-    , src_( src )
+    SetOnBoundary( const Grid4DDataScalar< double >& src, const Grid4DDataScalar< double >& dst, const int num_shells )
+    : src_( src )
     , dst_( dst )
+    , num_shells_( num_shells )
     {}
 
     KOKKOS_INLINE_FUNCTION
-    void operator()( const int x, const int y, const int r ) const
+    void operator()( const int local_subdomain_idx, const int x, const int y, const int r ) const
     {
-        if ( x == 0 || y == 0 || r == 0 || x == grid_.size_x() - 1 || y == grid_.size_y() - 1 ||
-             r == grid_.size_r() - 1 )
+        if (
+#if SINGLE_DIAMOND
+            ( x == 0 || y == 0 || r == 0 || x == grid_.size_x() - 1 || y == grid_.size_y() - 1 ||
+              r == grid_.size_r() - 1 )
+#else
+            ( r == 0 || r == num_shells_ - 1 )
+#endif
+        )
+
         {
-            dst_( x, y, r ) = src_( x, y, r );
+            dst_( local_subdomain_idx, x, y, r ) = src_( local_subdomain_idx, x, y, r );
         }
     }
 };
 
 struct LaplaceOperator
 {
-    ThickSphericalShellSubdomainGrid grid_;
-    Grid3DDataScalar< double >       src_;
-    Grid3DDataScalar< double >       dst_;
-    bool                             treat_boundary_;
-    bool                             diagonal_;
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+
+    Grid4DDataScalar< double > src_;
+    Grid4DDataScalar< double > dst_;
+    bool                       treat_boundary_;
+    bool                       diagonal_;
 
     LaplaceOperator(
-        const ThickSphericalShellSubdomainGrid& grid,
-        const Grid3DDataScalar< double >&       src,
-        const Grid3DDataScalar< double >&       dst,
-        const bool                              treat_boundary,
-        const bool                              diagonal )
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataScalar< double >& src,
+        const Grid4DDataScalar< double >& dst,
+        const bool                        treat_boundary,
+        const bool                        diagonal )
     : grid_( grid )
+    , radii_( radii )
     , src_( src )
     , dst_( dst )
     , treat_boundary_( treat_boundary )
     , diagonal_( diagonal )
     {}
 
-    KOKKOS_INLINE_FUNCTION void operator()( const int x_cell, const int y_cell, const int r_cell ) const
+    KOKKOS_INLINE_FUNCTION void
+        operator()( const int local_subdomain_id, const int x_cell, const int y_cell, const int r_cell ) const
     {
         // Extract vertex positions
         dense::Vec< double, 3 > coords[2][2][2];
@@ -120,7 +128,8 @@ struct LaplaceOperator
             {
                 for ( int r = r_cell; r <= r_cell + 1; r++ )
                 {
-                    coords[x - x_cell][y - y_cell][r - r_cell] = grid_.coords( x, y, r );
+                    coords[x - x_cell][y - y_cell][r - r_cell] =
+                        grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
                 }
             }
         }
@@ -169,7 +178,7 @@ struct LaplaceOperator
                     const int x_local                          = x - x_cell;
                     const int y_local                          = y - y_cell;
                     const int r_local                          = r - r_cell;
-                    src( 4 * r_local + 2 * y_local + x_local ) = src_( x, y, r );
+                    src( 4 * r_local + 2 * y_local + x_local ) = src_( local_subdomain_id, x, y, r );
                 }
             }
         }
@@ -473,41 +482,45 @@ struct LaplaceOperator
 
         // std::cout << A << std::endl;
 
-        // Later we will multiply all non-diagonal entries with row or column with that value.
-        dense::Mat< double, 8, 8 > boundary_mask;
-        boundary_mask.fill( 1.0 );
-
-        for ( int r = r_cell; r <= r_cell + 1; r++ )
+        if ( treat_boundary_ )
         {
-            for ( int y = y_cell; y <= y_cell + 1; y++ )
+            // Later we will multiply all non-diagonal entries with row or column with that value.
+            dense::Mat< double, 8, 8 > boundary_mask;
+            boundary_mask.fill( 1.0 );
+
+            for ( int r = r_cell; r <= r_cell + 1; r++ )
             {
-                for ( int x = x_cell; x <= x_cell + 1; x++ )
+                for ( int y = y_cell; y <= y_cell + 1; y++ )
                 {
-                    const double factor = ( x == 0 || y == 0 || r == 0 || x == grid_.size_x() - 1 ||
-                                            y == grid_.size_y() - 1 || r == grid_.size_r() - 1 ) ?
-                                              0.0 :
-                                              1.0;
-
-                    const int x_local = x - x_cell;
-                    const int y_local = y - y_cell;
-                    const int r_local = r - r_cell;
-
-                    const int diag_entry = 4 * r_local + 2 * y_local + x_local;
-
-                    for ( int i = 0; i < 8; i++ )
+                    for ( int x = x_cell; x <= x_cell + 1; x++ )
                     {
-                        if ( i != diag_entry )
+#if SINGLE_DIAMOND
+                        const double factor = ( x == 0 || y == 0 || r == 0 || x == grid_.size_x() - 1 ||
+                                                y == grid_.size_y() - 1 || r == grid_.size_r() - 1 ) ?
+                                                  0.0 :
+                                                  1.0;
+#else
+                        const double factor = ( r == 0 || r == radii_.extent( 1 ) - 1 ) ? 0.0 : 1.0;
+#endif
+
+                        const int x_local = x - x_cell;
+                        const int y_local = y - y_cell;
+                        const int r_local = r - r_cell;
+
+                        const int diag_entry = 4 * r_local + 2 * y_local + x_local;
+
+                        for ( int i = 0; i < 8; i++ )
                         {
-                            boundary_mask( i, diag_entry ) *= factor;
-                            boundary_mask( diag_entry, i ) *= factor;
+                            if ( i != diag_entry )
+                            {
+                                boundary_mask( i, diag_entry ) *= factor;
+                                boundary_mask( diag_entry, i ) *= factor;
+                            }
                         }
                     }
                 }
             }
-        }
 
-        if ( treat_boundary_ )
-        {
             A.hadamard_product( boundary_mask );
         }
 
@@ -539,7 +552,8 @@ struct LaplaceOperator
                     const int y_local = y - y_cell;
                     const int r_local = r - r_cell;
 
-                    Kokkos::atomic_add( &dst_( x, y, r ), dst( 4 * r_local + 2 * y_local + x_local ) );
+                    Kokkos::atomic_add(
+                        &dst_( local_subdomain_id, x, y, r ), dst( 4 * r_local + 2 * y_local + x_local ) );
                 }
             }
         }
@@ -548,24 +562,26 @@ struct LaplaceOperator
 
 // x = x + wI * ( b - Ax )
 void richardson_step(
-    const ThickSphericalShellSubdomainGrid& grid,
-    const Grid3DDataScalar< double >&       x,
-    const Grid3DDataScalar< double >&       b,
-    const Grid3DDataScalar< double >&       tmp,
-    const double                            omega )
+    const DistributedDomain&          domain,
+    const Grid3DDataVec< double, 3 >& grid,
+    const Grid2DDataScalar< double >& radii,
+    const Grid4DDataScalar< double >& x,
+    const Grid4DDataScalar< double >& b,
+    const Grid4DDataScalar< double >& tmp,
+    const double                      omega )
 {
     // We need that in matvec - maybe resolved when stencils?
     kernels::common::set_constant( tmp, 0.0 );
 
     Kokkos::parallel_for(
         "matvec",
-        Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x() - 1, grid.size_y() - 1, grid.size_r() - 1 } ),
-        LaplaceOperator( grid, x, tmp, true, false ) );
+        grid::shell::local_domain_md_range_policy_cells( domain ),
+        LaplaceOperator( grid, radii, x, tmp, true, false ) );
 
     kernels::common::lincomb( x, 1.0, x, omega, b, -omega, tmp );
 }
-
-int main( int argc, char** argv )
+#if 0
+void single_diamond()
 {
     /**
 
@@ -590,127 +606,247 @@ int main( int argc, char** argv )
 
     **/
 
+    ThickSphericalShellSubdomainGrid grid( 3, 7, 1, 0, 0, grid::shell::uniform_shell_radii( 0.5, 1.0, 4 ) );
+
+    // Some vectors.
+    // Default initialized to zero.
+    Grid3DDataScalar< double > u( "u", grid.size_x(), grid.size_y(), grid.size_r() );
+    Grid3DDataScalar< double > g( "g", grid.size_x(), grid.size_y(), grid.size_r() );
+    Grid3DDataScalar< double > Adiagg( "Adiagg", grid.size_x(), grid.size_y(), grid.size_r() );
+    Grid3DDataScalar< double > tmp( "tmp", grid.size_x(), grid.size_y(), grid.size_r() );
+    Grid3DDataScalar< double > solution( "solution", grid.size_x(), grid.size_y(), grid.size_r() );
+    Grid3DDataScalar< double > error( "error", grid.size_x(), grid.size_y(), grid.size_r() );
+
+    // Set up solution data.
+    Kokkos::parallel_for(
+        "solution interpolation",
+        Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x(), grid.size_y(), grid.size_r() } ),
+        SolutionInterpolator( grid, solution, false ) );
+
+    // Set up boundary data.
+    Kokkos::parallel_for(
+        "boundary interpolation",
+        Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x(), grid.size_y(), grid.size_r() } ),
+        SolutionInterpolator( grid, g, true ) );
+
+    Kokkos::parallel_for(
+        "matvec",
+        Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x() - 1, grid.size_y() - 1, grid.size_r() - 1 } ),
+        LaplaceOperator( grid, g, Adiagg, false, true ) );
+
+    // Set up the right-hand side.
+    Grid3DDataScalar< double > b( "b", grid.size_x(), grid.size_y(), grid.size_r() );
+
+    Kokkos::parallel_for(
+        "matvec",
+        Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x() - 1, grid.size_y() - 1, grid.size_r() - 1 } ),
+        LaplaceOperator( grid, g, b, false, false ) );
+
+    terra::kernels::common::scale( b, -1.0 );
+
+    Kokkos::parallel_for(
+        "set on boundary",
+        Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x(), grid.size_y(), grid.size_r() } ),
+        SetOnBoundary( grid, Adiagg, b ) );
+
+    // Solve.
+
+    for ( int iter = 0; iter < 1000; iter++ )
+    {
+        std::cout << "iter = " << iter << std::endl;
+        richardson_step( grid, u, b, tmp, 0.3 );
+    }
+
+    kernels::common::lincomb( error, 1.0, u, -1.0, solution );
+
+    // Output VTK.
+    terra::vtk::write_surface_radial_extruded_to_wedge_vtu(
+        grid.unit_sphere_coords(),
+        grid.shell_radii(),
+        std::optional( g ),
+        "g",
+        "g.vtu",
+        vtk::DiagonalSplitType::BACKWARD_SLASH );
+
+    terra::vtk::write_surface_radial_extruded_to_wedge_vtu(
+        grid.unit_sphere_coords(),
+        grid.shell_radii(),
+        std::optional( u ),
+        "u",
+        "u.vtu",
+        vtk::DiagonalSplitType::BACKWARD_SLASH );
+
+    terra::vtk::write_surface_radial_extruded_to_wedge_vtu(
+        grid.unit_sphere_coords(),
+        grid.shell_radii(),
+        std::optional( solution ),
+        "solution",
+        "solution.vtu",
+        vtk::DiagonalSplitType::BACKWARD_SLASH );
+
+    terra::vtk::write_surface_radial_extruded_to_wedge_vtu(
+        grid.unit_sphere_coords(),
+        grid.shell_radii(),
+        std::optional( error ),
+        "error",
+        "error.vtu",
+        vtk::DiagonalSplitType::BACKWARD_SLASH );
+}
+#endif
+
+void single_apply()
+{
+    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 4, 3, 0.5, 1.0 );
+
+    const auto src = grid::shell::allocate_scalar_grid( "src", domain );
+    const auto dst = grid::shell::allocate_scalar_grid( "dst", domain );
+
+    communication::SubdomainNeighborhoodSendBuffer send_buffers( domain );
+    communication::SubdomainNeighborhoodRecvBuffer recv_buffers( domain );
+
+    std::vector< std::array< int, 11 > > expected_recvs_metadata;
+    std::vector< MPI_Request >           expected_recvs_requests;
+
+    const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
+    const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
+
+    Kokkos::parallel_for(
+        "solution interpolation",
+        local_domain_md_range_policy_nodes( domain ),
+        SolutionInterpolator( subdomain_shell_coords, subdomain_radii, src, false ) );
+
+    // kernels::common::set_constant( dst, 1.0 );
+
+#if 1
+    Kokkos::parallel_for(
+        "matvec",
+        grid::shell::local_domain_md_range_policy_cells( domain ),
+        LaplaceOperator( subdomain_shell_coords, subdomain_radii, src, dst, false, false ) );
+#endif
+
+#if 1
+    communication::pack_and_send_local_subdomain_boundaries(
+        domain, dst, send_buffers, expected_recvs_requests, expected_recvs_metadata );
+
+    MPI_Barrier( MPI_COMM_WORLD );
+    Kokkos::fence();
+
+    communication::recv_unpack_and_add_local_subdomain_boundaries(
+        domain, dst, recv_buffers, expected_recvs_requests, expected_recvs_metadata );
+#endif
+
+    terra::vtk::VTKOutput vtk_after( subdomain_shell_coords, subdomain_radii, "laplace_apply.vtu", false );
+    vtk_after.add_scalar_field( src.label(), src );
+    vtk_after.add_scalar_field( dst.label(), dst );
+    vtk_after.write();
+}
+
+#if 1
+
+void all_diamonds()
+{
+    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 4, 4, 0.5, 1.0 );
+
+    const auto u        = grid::shell::allocate_scalar_grid( "u", domain );
+    const auto g        = grid::shell::allocate_scalar_grid( "g", domain );
+    const auto Adiagg   = grid::shell::allocate_scalar_grid( "Adiagg", domain );
+    const auto tmp      = grid::shell::allocate_scalar_grid( "tmp", domain );
+    const auto solution = grid::shell::allocate_scalar_grid( "solution", domain );
+    const auto error    = grid::shell::allocate_scalar_grid( "error", domain );
+    const auto b        = grid::shell::allocate_scalar_grid( "b", domain );
+
+    communication::SubdomainNeighborhoodSendBuffer send_buffers( domain );
+    communication::SubdomainNeighborhoodRecvBuffer recv_buffers( domain );
+
+    std::vector< std::array< int, 11 > > expected_recvs_metadata;
+    std::vector< MPI_Request >           expected_recvs_requests;
+
+    const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
+    const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
+
+    // Set up solution data.
+    Kokkos::parallel_for(
+        "solution interpolation",
+        local_domain_md_range_policy_nodes( domain ),
+        SolutionInterpolator( subdomain_shell_coords, subdomain_radii, solution, false ) );
+
+    // Set up boundary data.
+    Kokkos::parallel_for(
+        "boundary interpolation",
+        local_domain_md_range_policy_nodes( domain ),
+        SolutionInterpolator( subdomain_shell_coords, subdomain_radii, g, true ) );
+
+    Kokkos::parallel_for(
+        "matvec",
+        grid::shell::local_domain_md_range_policy_cells( domain ),
+        LaplaceOperator( subdomain_shell_coords, subdomain_radii, g, Adiagg, false, true ) );
+
+    communication::pack_and_send_local_subdomain_boundaries(
+        domain, Adiagg, send_buffers, expected_recvs_requests, expected_recvs_metadata );
+    communication::recv_unpack_and_add_local_subdomain_boundaries(
+        domain, Adiagg, recv_buffers, expected_recvs_requests, expected_recvs_metadata );
+
+    Kokkos::parallel_for(
+        "matvec",
+        grid::shell::local_domain_md_range_policy_cells( domain ),
+        LaplaceOperator( subdomain_shell_coords, subdomain_radii, g, b, false, false ) );
+
+    communication::pack_and_send_local_subdomain_boundaries(
+        domain, b, send_buffers, expected_recvs_requests, expected_recvs_metadata );
+    communication::recv_unpack_and_add_local_subdomain_boundaries(
+        domain, b, recv_buffers, expected_recvs_requests, expected_recvs_metadata );
+
+    terra::kernels::common::scale( b, -1.0 );
+
+    Kokkos::parallel_for(
+        "set on boundary",
+        grid::shell::local_domain_md_range_policy_nodes( domain ),
+        SetOnBoundary( Adiagg, b, domain.domain_info().subdomain_num_nodes_radially() ) );
+
+    // Solve.
+
+    const double omega = 0.3;
+
+    for ( int iter = 0; iter < 1000; iter++ )
+    {
+        std::cout << "iter = " << iter << std::endl;
+
+        // We need that in matvec - maybe resolved when stencils?
+        kernels::common::set_constant( tmp, 0.0 );
+
+        Kokkos::parallel_for(
+            "matvec",
+            grid::shell::local_domain_md_range_policy_cells( domain ),
+            LaplaceOperator( subdomain_shell_coords, subdomain_radii, u, tmp, true, false ) );
+
+        communication::pack_and_send_local_subdomain_boundaries(
+            domain, tmp, send_buffers, expected_recvs_requests, expected_recvs_metadata );
+        communication::recv_unpack_and_add_local_subdomain_boundaries(
+            domain, tmp, recv_buffers, expected_recvs_requests, expected_recvs_metadata );
+
+        kernels::common::lincomb( u, 1.0, u, omega, b, -omega, tmp );
+    }
+
+    kernels::common::lincomb( error, 1.0, u, -1.0, solution );
+
+    terra::vtk::VTKOutput vtk_after( subdomain_shell_coords, subdomain_radii, "laplace.vtu", false );
+    vtk_after.add_scalar_field( g.label(), g );
+    vtk_after.add_scalar_field( u.label(), u );
+    vtk_after.add_scalar_field( solution.label(), solution );
+    vtk_after.add_scalar_field( error.label(), error );
+    vtk_after.write();
+}
+#endif
+
+int main( int argc, char** argv )
+{
+    MPI_Init( &argc, &argv );
     Kokkos::initialize( argc, argv );
     {
-        // Set up subdomain.
-        std::vector< double > radii;
-        for ( int i = 0; i <= 10; i++ )
-        {
-            radii.push_back( 0.5 + i * 0.05 );
-        }
-
-        ThickSphericalShellSubdomainGrid grid( 3, 7, 1, 0, 0, radii );
-
-        // Some vectors.
-        // Default initialized to zero.
-        Grid3DDataScalar< double > u( "u", grid.size_x(), grid.size_y(), grid.size_r() );
-        Grid3DDataScalar< double > g( "g", grid.size_x(), grid.size_y(), grid.size_r() );
-        Grid3DDataScalar< double > Adiagg( "Adiagg", grid.size_x(), grid.size_y(), grid.size_r() );
-        Grid3DDataScalar< double > tmp( "tmp", grid.size_x(), grid.size_y(), grid.size_r() );
-        Grid3DDataScalar< double > solution( "solution", grid.size_x(), grid.size_y(), grid.size_r() );
-        Grid3DDataScalar< double > error( "error", grid.size_x(), grid.size_y(), grid.size_r() );
-
-        // Kokkos::parallel_for(
-        //     "solution interpolation",
-        //     Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x(), grid.size_y(), grid.size_r() } ),
-        //     TestInterpolator( grid, u ) );
-
-        // Set up solution data.
-        Kokkos::parallel_for(
-            "solution interpolation",
-            Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x(), grid.size_y(), grid.size_r() } ),
-            SolutionInterpolator( grid, solution, false ) );
-
-        Kokkos::fence();
-
-        // Set up boundary data.
-        Kokkos::parallel_for(
-            "boundary interpolation",
-            Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x(), grid.size_y(), grid.size_r() } ),
-            SolutionInterpolator( grid, g, true ) );
-
-        Kokkos::fence();
-
-        Kokkos::parallel_for(
-            "matvec",
-            Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x() - 1, grid.size_y() - 1, grid.size_r() - 1 } ),
-            LaplaceOperator( grid, g, Adiagg, false, true ) );
-
-        Kokkos::fence();
-
-        // Set up the right-hand side.
-        Grid3DDataScalar< double > b( "b", grid.size_x(), grid.size_y(), grid.size_r() );
-
-        Kokkos::parallel_for(
-            "matvec",
-            Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x() - 1, grid.size_y() - 1, grid.size_r() - 1 } ),
-            LaplaceOperator( grid, g, b, false, false ) );
-
-        Kokkos::fence();
-
-        terra::kernels::common::scale( b, -1.0 );
-
-        Kokkos::parallel_for(
-            "set on boundary",
-            Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x(), grid.size_y(), grid.size_r() } ),
-            SetOnBoundary( grid, Adiagg, b ) );
-
-        // Solve.
-
-        for ( int iter = 0; iter < 1000; iter++ )
-        {
-            std::cout << "iter = " << iter << std::endl;
-            richardson_step( grid, u, b, tmp, 0.3 );
-        }
-
-        Kokkos::fence();
-
-        // Correct solution at the boundary.
-        // kernels::common::lincomb( u, 1.0, u, 1.0, g );
-        // Kokkos::parallel_for(
-        //     "set on boundary",
-        //     Kokkos::MDRangePolicy( { 0, 0, 0 }, { grid.size_x(), grid.size_y(), grid.size_r() } ),
-        //     SetOnBoundary( grid, g, u ) );
-
-        Kokkos::fence();
-
-        kernels::common::lincomb( error, 1.0, u, -1.0, solution );
-
-        Kokkos::fence();
-
-        // Output VTK.
-        terra::vtk::write_surface_radial_extruded_to_wedge_vtu(
-            grid.unit_sphere_coords(),
-            grid.shell_radii(),
-            std::optional( g ),
-            "g",
-            "g.vtu",
-            vtk::DiagonalSplitType::BACKWARD_SLASH );
-
-        terra::vtk::write_surface_radial_extruded_to_wedge_vtu(
-            grid.unit_sphere_coords(),
-            grid.shell_radii(),
-            std::optional( u ),
-            "u",
-            "u.vtu",
-            vtk::DiagonalSplitType::BACKWARD_SLASH );
-
-        terra::vtk::write_surface_radial_extruded_to_wedge_vtu(
-            grid.unit_sphere_coords(),
-            grid.shell_radii(),
-            std::optional( solution ),
-            "solution",
-            "solution.vtu",
-            vtk::DiagonalSplitType::BACKWARD_SLASH );
-
-        terra::vtk::write_surface_radial_extruded_to_wedge_vtu(
-            grid.unit_sphere_coords(),
-            grid.shell_radii(),
-            std::optional( error ),
-            "error",
-            "error.vtu",
-            vtk::DiagonalSplitType::BACKWARD_SLASH );
+        // single_apply();
+        all_diamonds();
     }
     Kokkos::finalize();
+    MPI_Finalize();
     return 0;
 }

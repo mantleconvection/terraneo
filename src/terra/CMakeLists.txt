@@ -7,7 +7,9 @@ target_sources(terra
         PRIVATE
         types.hpp)
 
+add_subdirectory(communication)
 add_subdirectory(dense)
 add_subdirectory(grid)
 add_subdirectory(kokkos)
+add_subdirectory(mpi)
 add_subdirectory(vtk)

@@ -1,5 +1,10 @@
 # Terra 2.0
 
+## Documentation
+
+* radii extents per subdomain from inner to outer (BOUNDARY HANDLING IS FLAWED FOR MORE THAN ONE SUBDOMAIN IN RADIAL
+  DIRECTION (r != r.extent(...)))
+
 ## TODO
 
 - [ ] fix/document order of indices (radii first?)

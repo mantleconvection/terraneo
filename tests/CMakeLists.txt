@@ -1,50 +1,18 @@
-# Add test executable
-add_executable(test_interpolate test_interpolate.cpp)
+function(add_terra_test name)
+    add_executable(${name} ${name}.cpp)
+    if (MPI_FOUND)
+        target_link_libraries(${name} terra MPI::MPI_CXX)
+    else ()
+        target_link_libraries(${name} terra)
+    endif ()
+    target_include_directories(${name} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    add_test(NAME ${name} COMMAND ${name})
+endfunction()
 
-# Link Kokkos to the test target
-target_link_libraries(test_interpolate terra)
-
-# Include directories for tests
-target_include_directories(test_interpolate PRIVATE ${CMAKE_SOURCE_DIR}/src)
-
-# Add a test
-add_test(NAME test_interpolate COMMAND test_interpolate)
-
-
-# Add test executable
-add_executable(test_mesh test_mesh.cpp)
-
-# Link Kokkos to the test target
-target_link_libraries(test_mesh terra)
-
-# Include directories for tests
-target_include_directories(test_mesh PRIVATE ${CMAKE_SOURCE_DIR}/src)
-
-# Add a test
-add_test(NAME test_mesh COMMAND test_mesh)
-
-
-# Add test executable
-add_executable(test_laplace test_laplace.cpp)
-
-# Link Kokkos to the test target
-target_link_libraries(test_laplace terra)
-
-# Include directories for tests
-target_include_directories(test_laplace PRIVATE ${CMAKE_SOURCE_DIR}/src)
-
-# Add a test
-add_test(NAME test_laplace COMMAND test_laplace)
-
-
-# Add test executable
-add_executable(test_kokkos_smoke test_kokkos_smoke.cpp)
-
-# Link Kokkos to the test target
-target_link_libraries(test_kokkos_smoke terra Kokkos::kokkos)
-
-# Include directories for tests
-target_include_directories(test_kokkos_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
-
-# Add a test
-add_test(NAME test_kokkos_smoke COMMAND test_kokkos_smoke)
+add_terra_test(test_interpolate)
+add_terra_test(test_mesh)
+add_terra_test(test_laplace)
+add_terra_test(test_kokkos_smoke)
+add_terra_test(test_mpi_buffer)
+add_terra_test(test_mpi_smoke)
+add_terra_test(test_no_mpi_diamond_communication)

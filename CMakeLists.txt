@@ -14,6 +14,24 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 # Find Kokkos
 # find_package(Kokkos REQUIRED)
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
+
+find_package(MPI)
+if (MPI_FOUND)
+    include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH} ${MPI_C_INCLUDE_PATH})
+    foreach (LIB ${MPI_C_LIBRARIES} ${MPI_CXX_LIBRARIES})
+        if (LIB)
+            list(APPEND SERVICE_LIBS ${LIB})
+        endif ()
+    endforeach ()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${MPI_CXX_COMPILE_FLAGS}")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${MPI_C_COMPILE_FLAGS}")
+
+    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${MPI_CXX_LINK_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${MPI_CXX_LINK_FLAGS}")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${MPI_CXX_LINK_FLAGS}")
+endif ()
+
 # Enable testing
 enable_testing()
 

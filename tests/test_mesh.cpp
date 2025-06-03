@@ -40,7 +40,7 @@ int main( int argc, char** argv )
 {
     Kokkos::initialize( argc, argv );
     {
-        const int    lateral_refinement_level = 3;
+        const int    lateral_refinement_level = 0;
         const double r_min                    = 0.5;
         const double r_max                    = 1.0;
         const int    num_shells               = 5;
