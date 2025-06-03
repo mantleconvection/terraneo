@@ -623,7 +623,7 @@ void all_diamonds()
 
     **/
 
-    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 4, 4, 0.5, 1.0 );
+    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 3, 3, 0.5, 1.0 );
 
     const auto u        = grid::shell::allocate_scalar_grid( "u", domain );
     const auto g        = grid::shell::allocate_scalar_grid( "g", domain );
@@ -687,7 +687,18 @@ void all_diamonds()
 
     for ( int iter = 0; iter < 1000; iter++ )
     {
-        std::cout << "iter = " << iter << std::endl;
+        if ( iter % 100 == 0 )
+        {
+            std::cout << "iter = " << iter;
+            const bool comp_norm = true;
+            if ( comp_norm )
+            {
+                kernels::common::lincomb( error, 1.0, u, -1.0, solution );
+                const auto error_inf_norm = kernels::common::max_magnitude( error );
+                std::cout << ", error inf norm: " << error_inf_norm;
+            }
+            std::cout << std::endl;
+        }
 
         // We need that in matvec - maybe resolved when stencils?
         kernels::common::set_constant( tmp, 0.0 );

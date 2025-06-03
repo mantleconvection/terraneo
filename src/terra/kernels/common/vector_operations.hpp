@@ -61,20 +61,18 @@ void lincomb(
 }
 
 template < typename ScalarType >
-void axpy(
-    ScalarType                                  alpha,
-    const grid::Grid3DDataScalar< ScalarType >& x,
-    const grid::Grid3DDataScalar< ScalarType >& y )
+ScalarType max_magnitude( const grid::Grid4DDataScalar< ScalarType >& x )
 {
-    if ( x.extent( 0 ) != y.extent( 0 ) || x.extent( 1 ) != y.extent( 1 ) || x.extent( 2 ) != y.extent( 2 ) )
-    {
-        throw std::runtime_error( "axpy: x and y must have the same extent" );
-    }
-
-    Kokkos::parallel_for(
-        "axpy (Grid3DDataScalar)",
-        Kokkos::MDRangePolicy( { 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ) } ),
-        KOKKOS_LAMBDA( int i, int j, int k ) { y( i, j, k ) += alpha * x( i, j, k ); } );
+    ScalarType max_mag = 0.0;
+    Kokkos::parallel_reduce(
+        "lincomb 3 args (Grid3DDataScalar)",
+        Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, ScalarType& local_max ) {
+            ScalarType val = Kokkos::abs( x( local_subdomain, i, j, k ) );
+            local_max      = Kokkos::max( local_max, val );
+        },
+        Kokkos::Max< ScalarType >( max_mag ) );
+    return max_mag;
 }
 
 } // namespace terra::kernels::common
