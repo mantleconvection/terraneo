@@ -27,6 +27,20 @@ template < typename ScalarType >
 void lincomb(
     const grid::Grid4DDataScalar< ScalarType >& y,
     ScalarType                                  c_1,
+    const grid::Grid4DDataScalar< ScalarType >& x_1 )
+{
+    Kokkos::parallel_for(
+        "lincomb 1 arg (Grid4DDataScalar)",
+        Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { y.extent( 0 ), y.extent( 1 ), y.extent( 2 ), y.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
+            y( local_subdomain, i, j, k ) = c_1 * x_1( local_subdomain, i, j, k );
+        } );
+}
+
+template < typename ScalarType >
+void lincomb(
+    const grid::Grid4DDataScalar< ScalarType >& y,
+    ScalarType                                  c_1,
     const grid::Grid4DDataScalar< ScalarType >& x_1,
     ScalarType                                  c_2,
     const grid::Grid4DDataScalar< ScalarType >& x_2 )

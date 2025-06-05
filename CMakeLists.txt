@@ -36,6 +36,7 @@ endif ()
 enable_testing()
 
 # Add the src and tests subdirectories
+add_subdirectory(benchmarks)
 add_subdirectory(extern)
 add_subdirectory(src)
 add_subdirectory(tests)
