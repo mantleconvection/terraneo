@@ -3,9 +3,9 @@
 
 #include <ranges>
 
-#include "../../point_3d.hpp"
-
 namespace terra::grid::shell {
+
+using dense::Vec3;
 
 std::vector< double > uniform_shell_radii( const double r_min, const double r_max, const int num_shells )
 {
@@ -31,14 +31,14 @@ std::vector< double > uniform_shell_radii( const double r_min, const double r_ma
 // and the number of intervals N = ntan - 1.
 struct BaseCorners
 {
-    Point3D p00; // Coordinates for global index (0, 0)
-    Point3D p0N; // Coordinates for global index (0, N)
-    Point3D pN0; // Coordinates for global index (N, 0)
-    Point3D pNN; // Coordinates for global index (N, N)
-    int     N;   // Number of intervals = ntan - 1. Must be power of 2.
+    Vec3 p00; // Coordinates for global index (0, 0)
+    Vec3 p0N; // Coordinates for global index (0, N)
+    Vec3 pN0; // Coordinates for global index (N, 0)
+    Vec3 pNN; // Coordinates for global index (N, N)
+    int  N;   // Number of intervals = ntan - 1. Must be power of 2.
 
     // Constructor for convenience (optional)
-    BaseCorners( Point3D p00_ = {}, Point3D p0N_ = {}, Point3D pN0_ = {}, Point3D pNN_ = {}, int N_ = 0 )
+    BaseCorners( Vec3 p00_ = {}, Vec3 p0N_ = {}, Vec3 pN0_ = {}, Vec3 pNN_ = {}, int N_ = 0 )
     : p00( p00_ )
     , p0N( p0N_ )
     , pN0( pN0_ )
@@ -48,7 +48,7 @@ struct BaseCorners
 };
 
 // Memoization cache type: maps (i, j) index pair to computed coordinates
-using MemoizationCache = std::map< std::pair< int, int >, Point3D >;
+using MemoizationCache = std::map< std::pair< int, int >, Vec3 >;
 
 /**
  * @brief Computes the coordinates for a specific node (i, j) in the final refined grid.
@@ -58,9 +58,9 @@ using MemoizationCache = std::map< std::pair< int, int >, Point3D >;
  * @param j Column index (0 to corners.N).
  * @param corners Struct containing base corner coordinates and N = ntan - 1.
  * @param cache Cache to store/retrieve already computed nodes.
- * @return Point3D Coordinates of the node (i, j) on the unit sphere.
+ * @return Vec3 Coordinates of the node (i, j) on the unit sphere.
  */
-static Point3D compute_node_recursive( int i, int j, const BaseCorners& corners, MemoizationCache& cache )
+static Vec3 compute_node_recursive( int i, int j, const BaseCorners& corners, MemoizationCache& cache )
 {
     // --- Get N and validate indices ---
     const int N    = corners.N;
@@ -132,7 +132,7 @@ static Point3D compute_node_recursive( int i, int j, const BaseCorners& corners,
         throw std::logic_error( "Internal logic error: Failed to find creation level for non-corner point." );
     }
 
-    Point3D p1, p2; // Parent points
+    Vec3 p1, p2; // Parent points
 
     // Identify the rule used at creation level l=2*l2, based on relative position
     if ( i % l == 0 && j % l == l2 )
@@ -165,10 +165,10 @@ static Point3D compute_node_recursive( int i, int j, const BaseCorners& corners,
     }
 
     // Calculate Euclidean midpoint
-    Point3D mid = p1 + p2;
+    Vec3 mid = p1 + p2;
 
     // Normalize to project onto the unit sphere
-    Point3D result = mid.normalized();
+    Vec3 result = mid.normalized();
 
     // --- 4. Store result in cache and return ---
     cache[cache_key] = result;
@@ -230,12 +230,12 @@ void compute_subdomain(
         for ( int j = j_start; j < j_end; ++j )
         {
             // Compute the node coordinates using the recursive function
-            Point3D coords = compute_node_recursive( i, j, corners, cache ); // Pass corners struct
+            Vec3 coords = compute_node_recursive( i, j, corners, cache ); // Pass corners struct
 
             // Store in the subdomain view (adjusting indices)
-            subdomain_coords_host( subdomain_idx, i - i_start, j - j_start, 0 ) = coords.x();
-            subdomain_coords_host( subdomain_idx, i - i_start, j - j_start, 1 ) = coords.y();
-            subdomain_coords_host( subdomain_idx, i - i_start, j - j_start, 2 ) = coords.z();
+            subdomain_coords_host( subdomain_idx, i - i_start, j - j_start, 0 ) = coords( 0 );
+            subdomain_coords_host( subdomain_idx, i - i_start, j - j_start, 1 ) = coords( 1 );
+            subdomain_coords_host( subdomain_idx, i - i_start, j - j_start, 2 ) = coords( 2 );
         }
     }
 }

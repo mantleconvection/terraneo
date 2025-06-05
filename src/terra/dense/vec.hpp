@@ -62,6 +62,29 @@ struct Vec
         }
         return Kokkos::sqrt( sum );
     }
+
+    /// @brief Normalize the vector to unit length in-place.
+    KOKKOS_INLINE_FUNCTION
+    void normalize()
+    {
+        T mag = norm();
+        if ( mag > 1e-15 )
+        { // Avoid division by zero
+            for ( int i = 0; i < N; ++i )
+            {
+                data[i] /= mag;
+            }
+        }
+    }
+
+    /// @brief Return a normalized copy of the vector.
+    KOKKOS_INLINE_FUNCTION
+    Vec normalized() const
+    {
+        Vec res = *this; // Make a copy
+        res.normalize();
+        return res;
+    }
 };
 
 template < typename T, int N >
@@ -73,5 +96,7 @@ std::ostream& operator<<( std::ostream& os, const Vec< T, N >& v )
     }
     return os;
 }
+
+using Vec3 = Vec< double, 3 >;
 
 } // namespace terra::dense

@@ -3,7 +3,6 @@
 #include <optional>
 
 #include "terra/grid/shell/spherical_shell.hpp"
-#include "terra/point_3d.hpp"
 #include "terra/vtk/vtk.hpp"
 
 struct SomeInterpolator
