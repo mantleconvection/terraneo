@@ -188,12 +188,13 @@ static Point3D compute_node_recursive( int i, int j, const BaseCorners& corners,
  *         for the subdomain. Dimensions are ((i_end_incl - 1) - i_start, (j_end_incl - 1) - j_start).
  */
 void compute_subdomain(
-    const Grid2DDataVec< double, 3 >& subdomain_coords_host,
-    const BaseCorners&                corners,
-    int                               i_start_incl,
-    int                               i_end_incl,
-    int                               j_start_incl,
-    int                               j_end_incl )
+    const Grid3DDataVec< double, 3 >::HostMirror& subdomain_coords_host,
+    int                                           subdomain_idx,
+    const BaseCorners&                            corners,
+    int                                           i_start_incl,
+    int                                           i_end_incl,
+    int                                           j_start_incl,
+    int                                           j_end_incl )
 {
     const int i_start = i_start_incl;
     const int j_start = j_start_incl;
@@ -216,7 +217,7 @@ void compute_subdomain(
     const size_t subdomain_rows = i_end - i_start;
     const size_t subdomain_cols = j_end - j_start;
 
-    if ( subdomain_coords_host.extent( 0 ) != subdomain_rows || subdomain_coords_host.extent( 1 ) != subdomain_cols )
+    if ( subdomain_coords_host.extent( 1 ) != subdomain_rows || subdomain_coords_host.extent( 2 ) != subdomain_cols )
     {
         throw std::runtime_error( "Invalid subdomain dimensions in compute_subdomain()." );
     }
@@ -232,21 +233,22 @@ void compute_subdomain(
             Point3D coords = compute_node_recursive( i, j, corners, cache ); // Pass corners struct
 
             // Store in the subdomain view (adjusting indices)
-            subdomain_coords_host( i - i_start, j - j_start, 0 ) = coords.x();
-            subdomain_coords_host( i - i_start, j - j_start, 1 ) = coords.y();
-            subdomain_coords_host( i - i_start, j - j_start, 2 ) = coords.z();
+            subdomain_coords_host( subdomain_idx, i - i_start, j - j_start, 0 ) = coords.x();
+            subdomain_coords_host( subdomain_idx, i - i_start, j - j_start, 1 ) = coords.y();
+            subdomain_coords_host( subdomain_idx, i - i_start, j - j_start, 2 ) = coords.z();
         }
     }
 }
 
 static void unit_sphere_single_shell_subdomain_coords(
-    const Grid2DDataVec< double, 3 >& subdomain_coords_host,
-    int                               diamond_id,
-    int                               ntan,
-    int                               i_start_incl,
-    int                               i_end_incl,
-    int                               j_start_incl,
-    int                               j_end_incl )
+    const Grid3DDataVec< double, 3 >::HostMirror& subdomain_coords_host,
+    int                                           subdomain_idx,
+    int                                           diamond_id,
+    int                                           ntan,
+    int                                           i_start_incl,
+    int                                           i_end_incl,
+    int                                           j_start_incl,
+    int                                           j_end_incl )
 {
     // Coordinates of the twelve icosahedral nodes of the base grid
     real_t i_node[12][3];
@@ -374,16 +376,18 @@ static void unit_sphere_single_shell_subdomain_coords(
         corners.p0N( i ) = i_node[d_node[diamond_id][R]][i];
     }
 
-    return compute_subdomain( subdomain_coords_host, corners, i_start_incl, i_end_incl, j_start_incl, j_end_incl );
+    return compute_subdomain(
+        subdomain_coords_host, subdomain_idx, corners, i_start_incl, i_end_incl, j_start_incl, j_end_incl );
 }
 
 static void unit_sphere_single_shell_subdomain_coords(
-    const Grid2DDataVec< double, 3 >& subdomain_coords_host,
-    int                               diamond_id,
-    int                               global_refinements,
-    int                               num_subdomains_per_side,
-    int                               subdomain_i,
-    int                               subdomain_j )
+    const Grid3DDataVec< double, 3 >::HostMirror& subdomain_coords_host,
+    int                                           subdomain_idx,
+    int                                           diamond_id,
+    int                                           global_refinements,
+    int                                           num_subdomains_per_side,
+    int                                           subdomain_i,
+    int                                           subdomain_j )
 {
     const auto elements_per_side = 1 << global_refinements;
     const auto ntan              = elements_per_side + 1;
@@ -401,7 +405,7 @@ static void unit_sphere_single_shell_subdomain_coords(
     const auto end_j = start_j + elements_in_subdomain_j;
 
     unit_sphere_single_shell_subdomain_coords(
-        subdomain_coords_host, diamond_id, ntan, start_i, end_i, start_j, end_j );
+        subdomain_coords_host, subdomain_idx, diamond_id, ntan, start_i, end_i, start_j, end_j );
 }
 
 Grid3DDataVec< double, 3 > subdomain_unit_sphere_single_shell_coords( const DistributedDomain& domain )
@@ -412,17 +416,15 @@ Grid3DDataVec< double, 3 > subdomain_unit_sphere_single_shell_coords( const Dist
         domain.domain_info().subdomain_num_nodes_per_side_laterally(),
         domain.domain_info().subdomain_num_nodes_per_side_laterally() );
 
-    auto subdomain_coords_host = Kokkos::create_mirror_view( subdomain_coords );
+    Grid3DDataVec< double, 3 >::HostMirror subdomain_coords_host = Kokkos::create_mirror_view( subdomain_coords );
 
     for ( const auto& [subdomain_info, data] : domain.subdomains() )
     {
         const auto& [subdomain_idx, neighborhood] = data;
 
-        auto single_subdomain_coords_host =
-            Kokkos::subview( subdomain_coords_host, subdomain_idx, Kokkos::ALL(), Kokkos::ALL(), Kokkos::ALL() );
-
         unit_sphere_single_shell_subdomain_coords(
-            single_subdomain_coords_host,
+            subdomain_coords_host,
+            subdomain_idx,
             subdomain_info.diamond_id(),
             domain.domain_info().global_lateral_refinement_level(),
             domain.domain_info().num_subdomains_per_diamond_side(),
@@ -441,7 +443,7 @@ Grid2DDataScalar< double > subdomain_shell_radii( const DistributedDomain& domai
 
     Grid2DDataScalar< double > radii_device(
         "subdomain_shell_radii", domain.subdomains().size(), shells_per_subdomain );
-    auto radii_host = Kokkos::create_mirror_view( radii_device );
+    Grid2DDataScalar< double >::HostMirror radii_host = Kokkos::create_mirror_view( radii_device );
 
     for ( const auto& [subdomain_info, data] : domain.subdomains() )
     {

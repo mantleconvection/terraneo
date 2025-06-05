@@ -1,6 +1,7 @@
 #pragma once
 #include <iostream>
 #include <ranges>
+#include <variant>
 #include <vector>
 
 #include "dense/vec.hpp"
@@ -214,6 +215,7 @@ MPI_Request schedule_recv( const KokkosBufferType& kokkos_recv_buffer, int sende
 }
 
 namespace detail {
+
 struct RecvRequestBoundaryInfo
 {
     grid::shell::SubdomainInfo                                                   sender_subdomain_info;
@@ -257,15 +259,22 @@ void pack_and_send_local_subdomain_boundaries(
         // ... edge-boundaries of the local subdomain ...
         for ( const auto& [local_edge_boundary, neighbors] : neighborhood.neighborhood_edge() )
         {
-            // Create a slice of the simulation data ...
-            const auto slice =
-                grid::kokkos_slice_boundary< grid::Grid3DDataScalar< double >, grid::Grid1DDataScalar< double > >(
-                    Kokkos::subview( data, local_subdomain_id, Kokkos::ALL, Kokkos::ALL, Kokkos::ALL ),
-                    local_edge_boundary );
-
-            // Copy data into buffers (to ensure contiguous memory layout) ...
             const auto& send_buffer = boundary_send_buffers.buffer_edge( local_subdomain_info, local_edge_boundary );
-            Kokkos::deep_copy( send_buffer, slice );
+
+            if ( local_edge_boundary == grid::BoundaryEdge::E_00R )
+            {
+                // Copy data into buffers (to ensure contiguous memory layout) ...
+                Kokkos::parallel_for(
+                    "fill_boundary_send_buffer_edge_" + to_string( local_edge_boundary ),
+                    Kokkos::RangePolicy( 0, send_buffer.extent( 0 ) ),
+                    KOKKOS_LAMBDA( const int idx ) { send_buffer( idx ) = data( local_subdomain_id, 0, 0, idx ); } );
+            }
+            else
+            {
+                Kokkos::abort( "Send not implemented for that edge boundary." );
+            }
+
+            Kokkos::fence( "deep_copy_into_send_buffer" );
 
             // Schedule sends and recvs (in the same order per process)...
             for ( const auto& [neighbor_subdomain_info, neighbor_local_boundary, neighbor_rank] : neighbors )
@@ -317,14 +326,53 @@ void pack_and_send_local_subdomain_boundaries(
         // ... face-boundaries of the local subdomain ...
         for ( const auto& [local_face_boundary, neighbor] : neighborhood.neighborhood_face() )
         {
-            // Create a slice of the simulation data ...
-            const auto slice =
-                grid::kokkos_slice_boundary< grid::Grid3DDataScalar< double >, grid::Grid2DDataScalar< double > >(
-                    Kokkos::subview( data, local_subdomain_id, Kokkos::ALL, Kokkos::ALL, Kokkos::ALL ),
-                    local_face_boundary );
+            const auto& send_buffer = boundary_send_buffers.buffer_face( local_subdomain_info, local_face_boundary );
 
-            // Copy data into buffers (to ensure contiguous memory layout) ...
-            Kokkos::deep_copy( boundary_send_buffers.buffer_face( local_subdomain_info, local_face_boundary ), slice );
+            if ( local_face_boundary == grid::BoundaryFace::F_X0R )
+            {
+                // Copy data into buffers (to ensure contiguous memory layout) ...
+                Kokkos::parallel_for(
+                    "fill_boundary_send_buffer_face_" + to_string( local_face_boundary ),
+                    Kokkos::MDRangePolicy( { 0, 0 }, { send_buffer.extent( 0 ), send_buffer.extent( 1 ) } ),
+                    KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
+                        send_buffer( idx_i, idx_j ) = data( local_subdomain_id, idx_i, 0, idx_j );
+                    } );
+            }
+            else if ( local_face_boundary == grid::BoundaryFace::F_X1R )
+            {
+                // Copy data into buffers (to ensure contiguous memory layout) ...
+                Kokkos::parallel_for(
+                    "fill_boundary_send_buffer_face_" + to_string( local_face_boundary ),
+                    Kokkos::MDRangePolicy( { 0, 0 }, { send_buffer.extent( 0 ), send_buffer.extent( 1 ) } ),
+                    KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
+                        send_buffer( idx_i, idx_j ) = data( local_subdomain_id, idx_i, data.extent( 2 ) - 1, idx_j );
+                    } );
+            }
+            else if ( local_face_boundary == grid::BoundaryFace::F_0YR )
+            {
+                // Copy data into buffers (to ensure contiguous memory layout) ...
+                Kokkos::parallel_for(
+                    "fill_boundary_send_buffer_face_" + to_string( local_face_boundary ),
+                    Kokkos::MDRangePolicy( { 0, 0 }, { send_buffer.extent( 0 ), send_buffer.extent( 1 ) } ),
+                    KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
+                        send_buffer( idx_i, idx_j ) = data( local_subdomain_id, 0, idx_i, idx_j );
+                    } );
+            }
+            else if ( local_face_boundary == grid::BoundaryFace::F_1YR )
+            {
+                // Copy data into buffers (to ensure contiguous memory layout) ...
+                Kokkos::parallel_for(
+                    "fill_boundary_send_buffer_face_" + to_string( local_face_boundary ),
+                    Kokkos::MDRangePolicy( { 0, 0 }, { send_buffer.extent( 0 ), send_buffer.extent( 1 ) } ),
+                    KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
+                        send_buffer( idx_i, idx_j ) = data( local_subdomain_id, data.extent( 1 ) - 1, idx_i, idx_j );
+                    } );
+            }
+            else
+            {
+                Kokkos::abort( "Send not implemented for that face boundary." );
+            }
+
             Kokkos::fence( "deep_copy_into_send_buffer" );
 
             // Schedule sends and recvs (in the same order per process)...
@@ -384,7 +432,7 @@ void recv_unpack_and_add_local_subdomain_boundaries(
 {
     if ( metadata_recv_requests.size() != metadata_recv_buffers.size() )
     {
-        throw std::logic_error( "Number of expected messages and requests do not match." );
+        Kokkos::abort( "Number of expected messages and requests do not match." );
     }
 
     const int num_expected_recvs = metadata_recv_requests.size();
@@ -445,19 +493,14 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                         const auto& [local_subdomain_id, neighborhood] =
                             domain.subdomains().at( receiver_subdomain_info );
 
-                        const auto volume_slice = grid::
-                            kokkos_slice_boundary< grid::Grid3DDataScalar< double >, grid::Grid1DDataScalar< double > >(
-                                Kokkos::subview( data, local_subdomain_id, Kokkos::ALL, Kokkos::ALL, Kokkos::ALL ),
-                                receiver_boundary_edge );
-
                         switch ( receiver_boundary_edge )
                         {
                         case grid::BoundaryEdge::E_00R:
                             Kokkos::parallel_for(
                                 "add_boundary_edge_" + to_string( receiver_boundary_edge ),
                                 Kokkos::RangePolicy( 0, recv_buffer.extent( 0 ) ),
-                                [=]( const int idx ) {
-                                    Kokkos::atomic_add( &volume_slice( idx ), recv_buffer( idx ) );
+                                KOKKOS_LAMBDA( const int idx ) {
+                                    Kokkos::atomic_add( &data( local_subdomain_id, 0, 0, idx ), recv_buffer( idx ) );
                                 } );
                             break;
                         default:
@@ -492,37 +535,47 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                         const auto& [local_subdomain_id, neighborhood] =
                             domain.subdomains().at( receiver_subdomain_info );
 
-                        const auto volume_slice = grid::
-                            kokkos_slice_boundary< grid::Grid3DDataScalar< double >, grid::Grid2DDataScalar< double > >(
-                                Kokkos::subview( data, local_subdomain_id, Kokkos::ALL, Kokkos::ALL, Kokkos::ALL ),
-                                receiver_boundary_face );
-
                         switch ( receiver_boundary_face )
                         {
                         case grid::BoundaryFace::F_0YR:
-                        case grid::BoundaryFace::F_X0R:
-                            // receiving from same pole (e.g., diamond 0 from diamond 1)
                             Kokkos::parallel_for(
                                 "add_boundary_face_" + to_string( receiver_boundary_face ),
                                 Kokkos::MDRangePolicy( { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
-                                [=]( const int idx_i, const int idx_j ) {
-                                    Kokkos::atomic_add( &volume_slice( idx_i, idx_j ), recv_buffer( idx_i, idx_j ) );
+                                KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
+                                    Kokkos::atomic_add(
+                                        &data( local_subdomain_id, 0, idx_i, idx_j ), recv_buffer( idx_i, idx_j ) );
+                                } );
+                            break;
+                        case grid::BoundaryFace::F_X0R:
+                            Kokkos::parallel_for(
+                                "add_boundary_face_" + to_string( receiver_boundary_face ),
+                                Kokkos::MDRangePolicy( { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
+                                KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
+                                    Kokkos::atomic_add(
+                                        &data( local_subdomain_id, idx_i, 0, idx_j ), recv_buffer( idx_i, idx_j ) );
                                 } );
                             break;
 
                         case grid::BoundaryFace::F_1YR:
-                        case grid::BoundaryFace::F_X1R:
-                            // receiving from the other pole (e.g., diamond 0 from diamond 5)
                             Kokkos::parallel_for(
                                 "add_boundary_face_" + to_string( receiver_boundary_face ),
                                 Kokkos::MDRangePolicy( { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
-                                [=]( const int idx_i, const int idx_j ) {
+                                KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
                                     Kokkos::atomic_add(
-                                        &volume_slice( idx_i, idx_j ),
+                                        &data( local_subdomain_id, data.extent( 1 ) - 1, idx_i, idx_j ),
                                         recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j ) );
                                 } );
                             break;
-
+                        case grid::BoundaryFace::F_X1R:
+                            Kokkos::parallel_for(
+                                "add_boundary_face_" + to_string( receiver_boundary_face ),
+                                Kokkos::MDRangePolicy( { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
+                                KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
+                                    Kokkos::atomic_add(
+                                        &data( local_subdomain_id, idx_i, data.extent( 2 ) - 1, idx_j ),
+                                        recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j ) );
+                                } );
+                            break;
                         default:
                             throw std::runtime_error( "Recv (unpack) not implemented for the passed boundary face." );
                         }

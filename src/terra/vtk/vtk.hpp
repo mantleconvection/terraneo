@@ -711,8 +711,8 @@ class VTKOutput
     // Define Host view types for field data storage for clarity
     // Assuming input fields are double, will be cast to float on write.
     // If input fields can be float, this could be templated further or use a base class.
-    using ScalarFieldHostView = Kokkos::View< double**** >;
-    using VectorFieldHostView = Kokkos::View< double**** [3] >;
+    using ScalarFieldHostView = Kokkos::View< double**** >::HostMirror;
+    using VectorFieldHostView = Kokkos::View< double**** [3] >::HostMirror;
 
     template < class ShellCoordsView, class RadiiView >
     VTKOutput(
@@ -724,20 +724,10 @@ class VTKOutput
     , is_quadratic_( generate_quadratic_elements_from_linear_input )
     {
         // 1. Copy input geometry data to managed host views (as before)
-        auto shell_coords_host_mirror_temp =
-            Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace(), shell_node_coords_device );
-        h_shell_coords_managed_ = Kokkos::View< double*** [3], Kokkos::LayoutRight, Kokkos::HostSpace >(
-            "h_shell_coords_managed_",
-            shell_node_coords_device.extent( 0 ),
-            shell_node_coords_device.extent( 1 ),
-            shell_node_coords_device.extent( 2 ) );
-        Kokkos::deep_copy( h_shell_coords_managed_, shell_coords_host_mirror_temp );
-
-        auto radii_host_mirror_temp =
-            Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace(), radii_per_layer_device );
-        h_radii_managed_ = Kokkos::View< double**, Kokkos::LayoutRight, Kokkos::HostSpace >(
-            "h_radii_managed_", radii_per_layer_device.extent( 0 ), radii_per_layer_device.extent( 1 ) );
-        Kokkos::deep_copy( h_radii_managed_, radii_host_mirror_temp );
+        h_shell_coords_managed_ = Kokkos::create_mirror_view( shell_node_coords_device );
+        Kokkos::deep_copy( h_shell_coords_managed_, shell_node_coords_device );
+        h_radii_managed_ = Kokkos::create_mirror_view( radii_per_layer_device );
+        Kokkos::deep_copy( h_radii_managed_, radii_per_layer_device );
 
         // 2. Get INPUT dimensions
         num_subdomains_      = h_shell_coords_managed_.extent( 0 );
@@ -1186,7 +1176,7 @@ class VTKOutput
             if ( NR_nodes_rad_input_ == 1 )
                 ir_in = 0;
 
-            if constexpr ( std::is_same_v< InputFieldViewType, grid::Grid4DDataScalar< double > > )
+            if constexpr ( std::is_same_v< InputFieldViewType, grid::Grid4DDataScalar< double >::HostMirror > )
             { // Scalar
                 interpolated_values[0] = h_field_data_input( sd, ix_in, iy_in, ir_in );
             }
@@ -1227,7 +1217,9 @@ class VTKOutput
                         double W_i   = ( i_off == 0 ) ? ( 1.0 - wx_param ) : wx_param;
 
                         double weight = W_i * W_j * R_k;
-                        if constexpr ( std::is_same_v< InputFieldViewType, grid::Grid4DDataScalar< double > > )
+                        if constexpr ( std::is_same_v<
+                                           InputFieldViewType,
+                                           grid::Grid4DDataScalar< double >::HostMirror > )
                         { // Scalar
                             val_sum[0] += weight * h_field_data_input( sd, ix_in, iy_in, ir_in );
                         }
@@ -1252,7 +1244,7 @@ class VTKOutput
             }
             else
             { // Original node or not enough points to interpolate from
-                if constexpr ( std::is_same_v< InputFieldViewType, grid::Grid4DDataScalar< double > > )
+                if constexpr ( std::is_same_v< InputFieldViewType, grid::Grid4DDataScalar< double >::HostMirror > )
                 {
                     interpolated_values[0] = h_field_data_input(
                         sd,
@@ -1318,8 +1310,8 @@ class VTKOutput
     std::string output_path_;
     bool        is_quadratic_;
 
-    Kokkos::View< double*** [3], Kokkos::LayoutRight, Kokkos::HostSpace > h_shell_coords_managed_;
-    Kokkos::View< double**, Kokkos::LayoutRight, Kokkos::HostSpace >      h_radii_managed_;
+    grid::Grid3DDataVec< double, 3 >::HostMirror h_shell_coords_managed_;
+    grid::Grid2DDataScalar< double >::HostMirror h_radii_managed_;
 
     size_t num_subdomains_;
     size_t NX_nodes_surf_input_, NY_nodes_surf_input_, NR_nodes_rad_input_;

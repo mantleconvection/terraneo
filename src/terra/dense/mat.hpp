@@ -33,6 +33,8 @@ struct Mat
         }
         return result;
     }
+
+    KOKKOS_INLINE_FUNCTION
     Mat< double, Rows, Cols >& operator+=( const Mat& mat )
     {
         for ( int i = 0; i < Rows; ++i )
@@ -45,6 +47,7 @@ struct Mat
         return *this;
     }
 
+    KOKKOS_INLINE_FUNCTION
     void fill( const T value )
     {
         for ( int i = 0; i < Rows; ++i )
@@ -56,6 +59,7 @@ struct Mat
         }
     }
 
+    KOKKOS_INLINE_FUNCTION
     Mat< double, Rows, Cols >& hadamard_product( const Mat& mat )
     {
         for ( int i = 0; i < Rows; ++i )
@@ -68,7 +72,6 @@ struct Mat
         return *this;
     }
 
-    KOKKOS_INLINE_FUNCTION
     Mat() = default;
 };
 

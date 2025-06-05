@@ -1,6 +1,6 @@
 add_library(terra)
 
-target_link_libraries(terra PUBLIC Kokkos::kokkos)
+target_link_libraries(terra PUBLIC Kokkos::kokkos MPI::MPI_CXX)
 target_include_directories(terra PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_sources(terra

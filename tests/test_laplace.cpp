@@ -551,7 +551,7 @@ void richardson_step(
 
 void single_apply()
 {
-    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 4, 3, 0.5, 1.0 );
+    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 2, 2, 0.5, 1.0 );
 
     const auto src = grid::shell::allocate_scalar_grid( "src", domain );
     const auto dst = grid::shell::allocate_scalar_grid( "dst", domain );
@@ -565,14 +565,16 @@ void single_apply()
     const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
     const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
 
+#if 0
     Kokkos::parallel_for(
         "solution interpolation",
         local_domain_md_range_policy_nodes( domain ),
         SolutionInterpolator( subdomain_shell_coords, subdomain_radii, src, false ) );
+#endif
 
-    // kernels::common::set_constant( dst, 1.0 );
+    kernels::common::set_constant( dst, 1.0 );
 
-#if 1
+#if 0
     Kokkos::parallel_for(
         "matvec",
         grid::shell::local_domain_md_range_policy_cells( domain ),
@@ -590,8 +592,10 @@ void single_apply()
         domain, dst, recv_buffers, expected_recvs_requests, expected_recvs_metadata );
 #endif
 
+    Kokkos::fence();
+
     terra::vtk::VTKOutput vtk_after( subdomain_shell_coords, subdomain_radii, "laplace_apply.vtu", false );
-    vtk_after.add_scalar_field( src.label(), src );
+    // vtk_after.add_scalar_field( src.label(), src );
     vtk_after.add_scalar_field( dst.label(), dst );
     vtk_after.write();
 }
@@ -692,11 +696,11 @@ void all_diamonds()
     double duration_matvec_sum = 0;
     double duration_iter_sum   = 0;
 
-    const int iterations = 200;
+    const int iterations = 100;
 
     for ( int iter = 0; iter < iterations; iter++ )
     {
-        if ( iter % 100 == 0 )
+        if ( iter % 10 == 0 )
         {
             std::cout << "iter = " << iter;
             const bool comp_norm = true;
@@ -739,6 +743,7 @@ void all_diamonds()
             "matvec",
             grid::shell::local_domain_md_range_policy_cells( domain ),
             LaplaceOperator( subdomain_shell_coords, subdomain_radii, u, tmp, true, false ) );
+        Kokkos::fence();
         duration_matvec_sum += timer_matvec.seconds();
 
         communication::pack_and_send_local_subdomain_boundaries(
@@ -748,6 +753,7 @@ void all_diamonds()
 
         kernels::common::lincomb( u, 1.0, u, omega, b, -omega, tmp );
 
+        Kokkos::fence();
         duration_iter_sum += timer.seconds();
     }
 
@@ -774,7 +780,7 @@ int main( int argc, char** argv )
     MPI_Init( &argc, &argv );
     Kokkos::initialize( argc, argv );
     {
-        // single_apply();
+        single_apply();
         all_diamonds();
     }
     Kokkos::finalize();
