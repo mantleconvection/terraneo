@@ -167,6 +167,14 @@ BenchmarkData
     Kokkos::fence();
     const double duration = timer.seconds() / executions;
 
+    // This does not seem to be necessary but leaving it here just in case.
+    const bool print_derived_value = false;
+    if ( print_derived_value )
+    {
+        const auto mm = terra::kernels::common::max_magnitude( y );
+        std::cout << "Printing some derived value to ensure nothing is optimized out: " << mm << std::endl;
+    }
+
     return BenchmarkData{ lateral_refinement_level, radial_refinement_level, dofs, duration };
 }
 
