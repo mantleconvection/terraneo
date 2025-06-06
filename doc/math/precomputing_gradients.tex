@@ -1,0 +1,245 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{parskip}
+\usepackage{cleveref}
+
+\title{Precomputing Gradients for the Spherical Shell}
+\author{Nils Kohl}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Let's consider the bilinear form for the Laplacian
+\begin{equation}
+    a(u, v) = \int_{\Omega} \nabla u \cdot \nabla v \, d\Omega,
+\end{equation}
+where $\Omega$ is the spherical shell.
+
+On each element, we need to approximate integrals of the form
+\begin{equation}
+    \int_{T} \nabla \phi_i \cdot \nabla \phi_j \, dT,
+\end{equation}
+where $\phi_i$ and $\phi_j$ are the shape functions associated with the $i$-th and $j$-th nodes of the element $T$.
+
+After transformation to the reference element, we can express this as
+\begin{equation}
+    \int_{T} \nabla \phi_i \cdot \nabla \phi_j = \int_{\hat{T}} J^{-T} \nabla N_i \cdot J^{-T} \nabla N_j |\det(J)| \, d\hat{T},
+\end{equation} 
+where $J$ is the Jacobian of the transformation from the reference element $\hat{T}$ to the physical element $T$, and $N_i$ and $N_j$ are the shape functions in the reference element.
+
+We approximate the integral by quadrature. Consider some quadrature point $q_k$ with weight $w_k$. The integral becomes
+\begin{equation}
+    \int_{T} \nabla \phi_i \cdot \nabla \phi_j \approx \sum_k w_k J^{-T}(q_k) \nabla N_i(q_k) \cdot J^{-T}(q_k) \nabla N_j(q_k) |\det(J(q_k))|.
+\end{equation}
+
+In a matrix-free setting, it is beneficial to exploit structure to avoid recomputing the gradients of the shape functions at each quadrature point for each element. 
+
+\section{Splitting the Jacobian}
+
+We know that the physical elements are extruded in radial direction from 2D elements. It comes to mind to somehow split the Jacobian into a radial part and a 2D part, such that we can precompute the gradients of the shape functions in the 2D reference element.
+
+I manage to arrive at a splitting of the Jacobian that looks like this
+\begin{equation}
+    J = J_\mathrm{lat} D_\mathrm{rad}
+\end{equation}
+where $J_\mathrm{lat}$ does not depend on the radial component of the physical element coordinates, and $D_\mathrm{rad}$ is a diagonal matrix.
+Specifically, we use the forward map 
+\begin{equation}
+    \label{eq:forward_map}
+    x(\xi, \eta, \zeta) = r(\zeta) X_\mathrm{surf}(\xi, \eta),
+\end{equation}
+where $X_\mathrm{surf} = [x_s(\xi,\eta), y_s(\xi,\eta), z_s(\xi,\eta)]^T$.
+Importantly, $X_\mathrm{surf}$ is on the surface of the spherical shell (or the unit sphere), i.e., it does not depend on the radial coordinate $\zeta$ and also not on the "physical radial coordinate".
+
+For the Jacobian, $J$ we compute
+\begin{align}
+    % ∂x/∂ξ = ∂/∂ξ [ r(ζ) * X_surf(ξ, η) ]
+    \frac{\partial x}{\partial \xi} &= \frac{\partial}{\partial \xi} (r(\zeta) X_\mathrm{surf}(\xi, \eta)) 
+    = r(\zeta) \frac{\partial}{\partial \xi} X_\mathrm{surf}(\xi, \eta) \\
+    \frac{\partial x}{\partial \eta} &= \frac{\partial}{\partial \eta} (r(\zeta) X_\mathrm{surf}(\xi, \eta)) 
+    = r(\zeta) \frac{\partial}{\partial \eta} X_\mathrm{surf}(\xi, \eta) \\
+    \frac{\partial x}{\partial \zeta} &= \frac{\partial}{\partial \zeta} (r(\zeta) X_\mathrm{surf}(\xi, \eta)) 
+    =  (\frac{\partial}{\partial \zeta} r(\zeta)) X_\mathrm{surf}(\xi, \eta)
+\end{align}
+and thus
+\begin{equation}
+    J = \begin{pmatrix}
+        r(\zeta) \frac{\partial X_\mathrm{surf}}{\partial \xi} & r(\zeta) \frac{\partial X_\mathrm{surf}}{\partial \eta} & \frac{\partial r}{\partial \zeta} X_\mathrm{surf}
+    \end{pmatrix}.
+\end{equation}
+This can be split now into a 2D part and a radial part:
+\begin{equation}
+    J = \begin{pmatrix}
+        \frac{\partial X_\mathrm{surf}}{\partial \xi} & \frac{\partial X_\mathrm{surf}}{\partial \eta} &  X_\mathrm{surf}
+    \end{pmatrix} \begin{pmatrix}
+        r(\zeta) & 0 & 0 \\
+        0 & r(\zeta) & 0 \\
+        0 & 0 & \frac{\partial r}{\partial \zeta}
+    \end{pmatrix} = J_\mathrm{lat} D_\mathrm{rad}.
+\end{equation}
+
+It would be nice if we could precompute a term like $J_\mathrm{lat}^{-T}(q_k) \nabla N_i(q_k)$ and then scale with $D_\mathrm{rad}$.
+
+Unfortunately, this is not straightforward since we arrive at
+\begin{equation}
+    J^{-T} \nabla N_i = J_\mathrm{lat}^{-T} D_\mathrm{rad}^{-1} \nabla N_i.
+\end{equation}
+and we cannot precompute $D_\mathrm{rad}^{-1}$ since it depends on the radial coordinate of the nodes of the physical element. (In general, matrix-matrix multiplication with diagonal matrices does not commute.)
+
+What we can (and will) do instead: we split the gradient up further.
+
+\section{(Almost) Precomputing the Physical Gradients}
+
+We consider shape functions that are defined through a tensor product of a radial part $N_i^\mathrm{rad}$ and a 2D part $N_i^\mathrm{lat}$, i.e., we have
+\begin{equation}
+    \label{eq:shape_function}
+    N_i(\xi, \eta, \zeta) = N_i^\mathrm{lat}(\xi, \eta) \, N_i^\mathrm{rad}(\zeta),
+\end{equation}
+with gradient
+\begin{equation}
+    \nabla N_i = \left( \frac{\partial N_i}{\partial \xi}, \frac{\partial N_i}{\partial \eta}, \frac{\partial N_i}{\partial \zeta} \right)^T.
+\end{equation}
+The components of the gradient are
+\begin{align}
+    \frac{\partial N_i}{\partial \xi} &= \frac{\partial N_i^\mathrm{lat}}{\partial \xi} N_i^\mathrm{rad}, \\
+    \frac{\partial N_i}{\partial \eta} &= \frac{\partial N_i^\mathrm{lat}}{\partial \eta} N_i^\mathrm{rad}, \\
+    \frac{\partial N_i}{\partial \zeta} &= N_i^\mathrm{lat} \frac{\partial N_i^\mathrm{rad}}{\partial \zeta}.
+\end{align}
+
+This provides the isolation we need to precompute the gradients of the shape functions in the 2D reference element.
+
+We want to compute
+\begin{equation}
+    J^{-T} \nabla N_i = J_\mathrm{lat}^{-T} D_\mathrm{rad}^{-1} \nabla N_i.
+\end{equation}
+
+Let's start with 
+\begin{equation}
+    D_\mathrm{rad}^{-1} \nabla N_i = \begin{bmatrix}
+        \frac{1}{r(\zeta)} \frac{\partial N_i^\mathrm{lat}}{\partial \xi} N_i^\mathrm{rad} \\
+        \frac{1}{r(\zeta)} \frac{\partial N_i^\mathrm{lat}}{\partial \eta} N_i^\mathrm{rad} \\
+        \frac{1}{\frac{\partial r}{\partial \zeta}} N_i^\mathrm{lat} \frac{\partial N_i^\mathrm{rad}}{\partial \zeta}
+    \end{bmatrix}
+    =
+    \frac{1}{r(\zeta)}
+    \begin{bmatrix}
+        \frac{\partial N_i^\mathrm{lat}}{\partial \xi} N_i^\mathrm{rad} \\
+        \frac{\partial N_i^\mathrm{lat}}{\partial \eta} N_i^\mathrm{rad} \\
+        0
+    \end{bmatrix}
+    +
+    \frac{\partial N_i^\mathrm{rad}}{\partial \zeta} \frac{1}{\frac{\partial r}{\partial \zeta}}
+    \begin{bmatrix}
+        0 \\
+        0 \\
+        N_i^\mathrm{lat}
+    \end{bmatrix}.
+\end{equation}
+
+Then we multiply with $J_\mathrm{lat}^{-T}$ from the left:
+\begin{equation}
+    J_\mathrm{lat}^{-T} D_\mathrm{rad}^{-1} \nabla N_i =
+    \frac{1}{r(\zeta)}  
+    \underbrace{
+    J_\mathrm{lat}^{-T}
+    \begin{bmatrix}  
+        \frac{\partial N_i^\mathrm{lat}}{\partial \xi} N_i^\mathrm{rad} \\
+        \frac{\partial N_i^\mathrm{lat}}{\partial \eta} N_i^\mathrm{rad} \\
+        0
+    \end{bmatrix}
+    }_{=:\, G_i^\mathrm{rad}(\xi, \eta)}
+    +
+    \frac{\partial N_i^\mathrm{rad}}{\partial \zeta} \frac{1}{\frac{\partial r}{\partial \zeta}} 
+    \underbrace{
+    J_\mathrm{lat}^{-T}
+    \begin{bmatrix}
+        0 \\
+        0 \\
+        N_i^\mathrm{lat}
+    \end{bmatrix}
+    }_{=:\, G_i^\mathrm{lat}(\xi, \eta)}.
+\end{equation}
+
+Putting everything together, we have
+\begin{align}
+    \int_{T} \nabla \phi_i \cdot \nabla \phi_j &\\ 
+    &\approx \sum_k w_k J^{-T}(q_k) \nabla N_i(q_k) \cdot J^{-T}(q_k) \nabla N_j(q_k) |\det(J(q_k))| \\
+    &= \sum_k w_k \left(\frac{1}{r(q_{k,\zeta})} G_i^{\mathrm{rad}}(q_{k,\xi}, q_{k,\eta}) + 
+    \frac{\partial N_i^\mathrm{rad}}{\partial \zeta} \frac{1}{\frac{\partial r}{\partial \zeta}} G_i^{\mathrm{lat}}(q_{k,\xi}, q_{k,\eta})\right) \cdot \\
+    & \left(\frac{1}{r(q_{k,\zeta})} G_j^{\mathrm{rad}}(q_{k,\xi}, q_{k,\eta}) + 
+    \frac{\partial N_j^\mathrm{rad}}{\partial \zeta} \frac{1}{\frac{\partial r}{\partial \zeta}} G_j^{\mathrm{lat}}(q_{k,\xi}, q_{k,\eta})\right) |\det(J(q_k))| 
+\end{align}
+where $q_k = (q_{k,\xi}, q_{k,\eta}, q_{k,\zeta})^T$.
+
+Finally must not forget the determinant of the Jacobian, which can be split as well:
+\begin{equation}
+    |\det(J(q_k))| = r(q_{k,\zeta})^2 \frac{\partial r}{\partial \zeta} \underbrace{|\det(J_\mathrm{lat}(q_{k,\xi}, q_{k,\eta}))|}_{G^\mathrm{det}(q_{k,\xi}, q_{k,\eta})}.
+\end{equation}
+($\frac{\partial r}{\partial \zeta} > 0$ by construction, see \cref{sec:concrete_implementation}.)
+
+We can precompute the terms $G_i^{\mathrm{rad}}(q_{k,\xi}, q_{k,\eta})$ and $G_i^{\mathrm{lat}}(q_{k,\xi}, q_{k,\eta})$ for all shape functions $i$ and quadrature points $k$. For tensor product quadrature, this reduces the number of quadrature points we need to precompute this for. Different approaches are possible: either we precompute and store
+these vectors a priori, or we compute them on-the-fly but cache them for all elements in radial direction (i.e., we loop over the radially aligned elements in the "innermost" loop).
+
+Obviously can be applied to any bilinear form that includes the gradient of the shape functions, not just the Laplacian.
+
+\section{Concrete Implementation}
+\label{sec:concrete_implementation}
+
+The above framework should be applicable to both hexahedral and prismatic (wedge) elements. Let's consider the case of prismatic elements, which are defined by a triangular 2D surface element and a radial extrusion. (Note: the triangular
+surface element is not curved in this case, but I suppose it could be curved as well.)
+
+The shape functions on the reference wedge
+\begin{equation}
+     [(0, 0, -1), (1, 0, -1), (0, 1, -1), (0, 0, 1), (1, 0, 1), (0, 1, 1)]
+\end{equation}
+are given by \cref{eq:shape_function} with
+\begin{align}
+    N_1^\mathrm{lat}(\xi, \eta) = N_4^\mathrm{lat}(\xi, \eta) &= 1 - \xi - \eta, \\
+    N_2^\mathrm{lat}(\xi, \eta) = N_5^\mathrm{lat}(\xi, \eta) &= \xi, \\
+    N_3^\mathrm{lat}(\xi, \eta) = N_6^\mathrm{lat}(\xi, \eta) &= \eta,
+\end{align}
+and
+\begin{align}
+    N_1^\mathrm{rad}(\zeta) = N_2^\mathrm{rad}(\zeta) = N_3^\mathrm{rad}(\zeta) &= \frac{1}{2}(1 - \zeta) \\
+    N_4^\mathrm{rad}(\zeta) = N_5^\mathrm{rad}(\zeta) = N_6^\mathrm{rad}(\zeta) &= \frac{1}{2}(1 + \zeta).
+\end{align}
+The gradients of the shape functions are then given by
+\begin{align}
+    \frac{\partial N^\mathrm{lat}_1}{\partial \xi} &= -1, & \frac{\partial N^\mathrm{lat}_1}{\partial \eta} &= -1, & \frac{\partial N^\mathrm{rad}_1}{\partial \zeta} &= -\frac{1}{2}, \\
+    \frac{\partial N^\mathrm{lat}_2}{\partial \xi} &= 1, & \frac{\partial N^\mathrm{lat}_2}{\partial \eta} &= 0, & \frac{\partial N^\mathrm{rad}_2}{\partial \zeta} &= -\frac{1}{2}, \\
+    \frac{\partial N^\mathrm{lat}_3}{\partial \xi} &= 0, & \frac{\partial N^\mathrm{lat}_3}{\partial \eta} &= 1, & \frac{\partial N^\mathrm{rad}_3}{\partial \zeta} &= -\frac{1}{2}, \\
+    \frac{\partial N^\mathrm{lat}_4}{\partial \xi} &= -1, & \frac{\partial N^\mathrm{lat}_4}{\partial \eta} &= -1, & \frac{\partial N^\mathrm{rad}_4}{\partial \zeta} &= \frac{1}{2}, \\    
+    \frac{\partial N^\mathrm{lat}_5}{\partial \xi} &= 1, & \frac{\partial N^\mathrm{lat}_5}{\partial \eta} &= 0, & \frac{\partial N^\mathrm{rad}_5}{\partial \zeta} &= \frac{1}{2}, \\
+    \frac{\partial N^\mathrm{lat}_6}{\partial \xi} &= 0, & \frac{\partial N^\mathrm{lat}_6}{\partial \eta} &= 1, & \frac{\partial N^\mathrm{rad}_6}{\partial \zeta} &= \frac{1}{2}.
+\end{align}
+
+It remains to compute the Jacobian. For that we need the forward map (\cref{eq:forward_map}) of the reference wedge to the physical wedge. Let the physical wedge $[p_1, \ldots, p_6]$ be defined by the three points $p^s_k = (x_k, y_k, z_k)^T, k = 1, 2, 3$ on the unit sphere and two radii $r_1, r_2, r_1 < r_2$:
+\begin{align}
+    p_k := r_1 p^s_k, & \quad k = 1, 2, 3, \\
+    p_{k+3} := r_2 p^s_k, & \quad k = 1, 2, 3.
+\end{align}
+
+We get the forward map \cref{eq:forward_map} with
+\begin{equation}
+    r(\zeta) = r_1 + \frac{r_2 - r_1}{2} (1 + \zeta),
+\end{equation}
+and the surface points
+\begin{align}
+    X_\mathrm{surf}(\xi, \eta) &= (1 - \xi - \eta) p^s_1 + \xi p^s_2 + \eta p^s_3, \\
+    &= (1 - \xi - \eta) (x_1, y_1, z_1)^T + \xi (x_2, y_2, z_2)^T + \eta (x_3, y_3, z_3)^T.
+\end{align}
+
+To complete the Jacobian, we compute the partial derivatives:
+\begin{align}
+    \frac{\partial X_\mathrm{surf}}{\partial \xi} &= - (x_1, y_1, z_1)^T + (x_2, y_2, z_2)^T, \\
+    \frac{\partial X_\mathrm{surf}}{\partial \eta} &= - (x_1, y_1, z_1)^T + (x_3, y_3, z_3)^T, \\
+    \frac{\partial r}{\partial \zeta} &= \frac{r_2 - r_1}{2}.
+\end{align}
+
+
+
+\end{document}
