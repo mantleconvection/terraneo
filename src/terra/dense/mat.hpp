@@ -12,6 +12,8 @@ struct Mat
     static constexpr int rows             = Rows;
     static constexpr int cols             = Cols;
 
+    static_assert( Rows > 0 && Cols > 0, "Matrix dimensions must be positive" );
+
     // Construct from columns (specialized for 2x2 and 3x3)
     KOKKOS_INLINE_FUNCTION
     constexpr Mat( const Vec< T, Rows >& col0, const Vec< T, Rows >& col1 )
@@ -146,7 +148,7 @@ struct Mat
         }
         else
         {
-            static_assert( false, "det() only implemented for 2x2 and 3x3 matrices" );
+            static_assert( Rows == -1, "det() only implemented for 2x2 and 3x3 matrices" );
         }
     }
 
@@ -184,7 +186,7 @@ struct Mat
         }
         else
         {
-            static_assert( false, "inv() only implemented for 2x2 and 3x3 matrices" );
+            static_assert( Rows == -1, "inv() only implemented for 2x2 and 3x3 matrices" );
         }
     }
 
