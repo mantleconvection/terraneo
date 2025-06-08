@@ -9,6 +9,7 @@ target_sources(terra
 
 add_subdirectory(communication)
 add_subdirectory(dense)
+add_subdirectory(fe)
 add_subdirectory(grid)
 add_subdirectory(kokkos)
 add_subdirectory(mpi)

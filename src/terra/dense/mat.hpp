@@ -12,11 +12,56 @@ struct Mat
     static constexpr int rows             = Rows;
     static constexpr int cols             = Cols;
 
+    // Construct from columns (specialized for 2x2 and 3x3)
+    KOKKOS_INLINE_FUNCTION
+    constexpr Mat( const Vec< T, Rows >& col0, const Vec< T, Rows >& col1 )
+    {
+        static_assert( Rows == 2 && Cols == 2, "This constructor is only for 2x2 matrices" );
+        data[0][0] = col0( 0 );
+        data[0][1] = col1( 0 );
+        data[1][0] = col0( 1 );
+        data[1][1] = col1( 1 );
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    constexpr Mat( const Vec< T, Rows >& col0, const Vec< T, Rows >& col1, const Vec< T, Rows >& col2 )
+    {
+        static_assert( Rows == 3 && Cols == 3, "This constructor is only for 3x3 matrices" );
+        data[0][0] = col0( 0 );
+        data[0][1] = col1( 0 );
+        data[0][2] = col2( 0 );
+        data[1][0] = col0( 1 );
+        data[1][1] = col1( 1 );
+        data[1][2] = col2( 1 );
+        data[2][0] = col0( 2 );
+        data[2][1] = col1( 2 );
+        data[2][2] = col2( 2 );
+    }
+
     KOKKOS_INLINE_FUNCTION
     T& operator()( int i, int j ) { return data[i][j]; }
 
     KOKKOS_INLINE_FUNCTION
     const T& operator()( int i, int j ) const { return data[i][j]; }
+
+    // Matrix-matrix multiplication
+    KOKKOS_INLINE_FUNCTION
+    Mat< T, Rows, Cols > operator*( const Mat< T, Cols, Cols >& rhs ) const
+    {
+        Mat< T, Rows, Cols > result;
+        for ( int i = 0; i < Rows; ++i )
+        {
+            for ( int j = 0; j < Cols; ++j )
+            {
+                result( i, j ) = T( 0 );
+                for ( int k = 0; k < Cols; ++k )
+                {
+                    result( i, j ) += data[i][k] * rhs( k, j );
+                }
+            }
+        }
+        return result;
+    }
 
     // Matrix-vector multiplication
     KOKKOS_INLINE_FUNCTION
@@ -48,6 +93,20 @@ struct Mat
     }
 
     KOKKOS_INLINE_FUNCTION
+    constexpr Mat< T, Cols, Rows > transposed() const
+    {
+        Mat< T, Cols, Rows > result;
+        for ( int i = 0; i < Rows; ++i )
+        {
+            for ( int j = 0; j < Cols; ++j )
+            {
+                result( j, i ) = data[i][j];
+            }
+        }
+        return result;
+    }
+
+    KOKKOS_INLINE_FUNCTION
     void fill( const T value )
     {
         for ( int i = 0; i < Rows; ++i )
@@ -70,6 +129,63 @@ struct Mat
             }
         }
         return *this;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    constexpr T det() const
+    {
+        if constexpr ( Rows == 2 && Cols == 2 )
+        {
+            return data[0][0] * data[1][1] - data[0][1] * data[1][0];
+        }
+        else if constexpr ( Rows == 3 && Cols == 3 )
+        {
+            return data[0][0] * ( data[1][1] * data[2][2] - data[1][2] * data[2][1] ) -
+                   data[0][1] * ( data[1][0] * data[2][2] - data[1][2] * data[2][0] ) +
+                   data[0][2] * ( data[1][0] * data[2][1] - data[1][1] * data[2][0] );
+        }
+        else
+        {
+            static_assert( false, "det() only implemented for 2x2 and 3x3 matrices" );
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    constexpr Mat inv() const
+    {
+        if constexpr ( Rows == 2 && Cols == 2 )
+        {
+            const T d = det();
+            if ( d == T( 0 ) )
+                Kokkos::abort( "Singular matrix" );
+            const T invDet = T( 1 ) / d;
+            return { { { data[1][1] * invDet, -data[0][1] * invDet }, { -data[1][0] * invDet, data[0][0] * invDet } } };
+        }
+        else if constexpr ( Rows == 3 && Cols == 3 )
+        {
+            const T d = det();
+            if ( d == T( 0 ) )
+                Kokkos::abort( "Singular matrix" );
+            const T id = T( 1 ) / d;
+
+            Mat< T, 3, 3 > r;
+            r( 0, 0 ) = ( data[1][1] * data[2][2] - data[1][2] * data[2][1] ) * id;
+            r( 0, 1 ) = -( data[0][1] * data[2][2] - data[0][2] * data[2][1] ) * id;
+            r( 0, 2 ) = ( data[0][1] * data[1][2] - data[0][2] * data[1][1] ) * id;
+
+            r( 1, 0 ) = -( data[1][0] * data[2][2] - data[1][2] * data[2][0] ) * id;
+            r( 1, 1 ) = ( data[0][0] * data[2][2] - data[0][2] * data[2][0] ) * id;
+            r( 1, 2 ) = -( data[0][0] * data[1][2] - data[0][2] * data[1][0] ) * id;
+
+            r( 2, 0 ) = ( data[1][0] * data[2][1] - data[1][1] * data[2][0] ) * id;
+            r( 2, 1 ) = -( data[0][0] * data[2][1] - data[0][1] * data[2][0] ) * id;
+            r( 2, 2 ) = ( data[0][0] * data[1][1] - data[0][1] * data[1][0] ) * id;
+            return r;
+        }
+        else
+        {
+            static_assert( false, "inv() only implemented for 2x2 and 3x3 matrices" );
+        }
     }
 
     Mat() = default;

@@ -11,6 +11,8 @@ struct Vec
 
     Vec() = default;
 
+    constexpr Vec( std::initializer_list< T > init ) { std::copy( init.begin(), init.end(), data ); }
+
     KOKKOS_INLINE_FUNCTION
     T& operator()( int i ) { return data[i]; }
 
@@ -44,11 +46,11 @@ struct Vec
     }
 
     KOKKOS_INLINE_FUNCTION
-    Vec operator*( T scalar ) const
+    Vec operator-( const Vec& rhs ) const
     {
         Vec out;
         for ( int i = 0; i < N; ++i )
-            out( i ) = data[i] * scalar;
+            out( i ) = data[i] - rhs( i );
         return out;
     }
 
@@ -85,7 +87,34 @@ struct Vec
         res.normalize();
         return res;
     }
+
+    KOKKOS_INLINE_FUNCTION
+    Vec inverted_elementwise() const
+    {
+        Vec res;
+        for ( int i = 0; i < N; ++i )
+            res( i ) = 1.0 / data[i];
+        return res;
+    }
 };
+
+template < typename T, int N >
+constexpr Vec< T, N > operator*( const Vec< T, N >& v, const T scalar ) noexcept
+{
+    Vec< T, N > result{};
+    for ( int i = 0; i < N; ++i )
+        result( i ) = v( i ) * scalar;
+    return result;
+}
+
+template < typename T, int N >
+constexpr Vec< T, N > operator*( const T scalar, const Vec< T, N >& v ) noexcept
+{
+    Vec< T, N > result{};
+    for ( int i = 0; i < N; ++i )
+        result( i ) = v( i ) * scalar;
+    return result;
+}
 
 template < typename T, int N >
 std::ostream& operator<<( std::ostream& os, const Vec< T, N >& v )

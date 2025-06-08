@@ -1,6 +1,7 @@
 
 #include <optional>
 
+#include "fe/wedge/integrands.hpp"
 #include "terra/communication/communication.hpp"
 #include "terra/dense/mat.hpp"
 #include "terra/grid/grid_types.hpp"
@@ -41,7 +42,7 @@ struct SolutionInterpolator
     void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
     {
         const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
-        const double                  value  = coords( 0 ) * Kokkos::sin( coords( 1 ) ) * Kokkos::cos( coords( 2 ) );
+        const double                  value  = coords( 0 ) * Kokkos::sin( coords( 1 ) ) * Kokkos::sinh( coords( 2 ) );
         // const double value = coords( 0 );
 
         if ( !only_boundary_ || ( r == 0 || r == radii_.extent( 1 ) - 1 ) )
@@ -528,6 +529,769 @@ struct LaplaceOperator
     }
 };
 
+struct LaplaceOperator2
+{
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+
+    Grid4DDataScalar< double > src_;
+    Grid4DDataScalar< double > dst_;
+    bool                       treat_boundary_;
+    bool                       diagonal_;
+
+    LaplaceOperator2(
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataScalar< double >& src,
+        const Grid4DDataScalar< double >& dst,
+        const bool                        treat_boundary,
+        const bool                        diagonal )
+    : grid_( grid )
+    , radii_( radii )
+    , src_( src )
+    , dst_( dst )
+    , treat_boundary_( treat_boundary )
+    , diagonal_( diagonal )
+    {}
+
+    KOKKOS_INLINE_FUNCTION void
+        operator()( const int local_subdomain_id, const int x_cell, const int y_cell, const int r_cell ) const
+    {
+        // Extract vertex positions
+        dense::Vec< double, 3 > coords[2][2];
+
+        for ( int x = x_cell; x <= x_cell + 1; x++ )
+        {
+            for ( int y = y_cell; y <= y_cell + 1; y++ )
+            {
+                coords[x - x_cell][y - y_cell]( 0 ) = grid_( local_subdomain_id, x, y, 0 );
+                coords[x - x_cell][y - y_cell]( 1 ) = grid_( local_subdomain_id, x, y, 1 );
+                coords[x - x_cell][y - y_cell]( 2 ) = grid_( local_subdomain_id, x, y, 2 );
+            }
+        }
+
+        const double x_unit_1 = coords[0][0]( 0 );
+        const double x_unit_2 = coords[1][0]( 0 );
+        const double x_unit_3 = coords[0][1]( 0 );
+        const double x_unit_4 = coords[1][1]( 0 );
+
+        const double y_unit_1 = coords[0][0]( 1 );
+        const double y_unit_2 = coords[1][0]( 1 );
+        const double y_unit_3 = coords[0][1]( 1 );
+        const double y_unit_4 = coords[1][1]( 1 );
+
+        const double z_unit_1 = coords[0][0]( 2 );
+        const double z_unit_2 = coords[1][0]( 2 );
+        const double z_unit_3 = coords[0][1]( 2 );
+        const double z_unit_4 = coords[1][1]( 2 );
+
+        // Gauss-Lobatto quadrature
+#if 0
+        constexpr int nq    = 3;
+        const double  q[nq] = { -1.0, 0.0, 1.0 };
+        const double  w[nq] = { 1.0 / 3.0, 4.0 / 3.0, 1.0 / 3.0 };
+#else
+        // Gauss-Legendre quadrature
+        constexpr int nq    = 2;
+        const double  q[nq] = { -0.57735026919, 0.57735026919 };
+        const double  w[nq] = { 1.0, 1.0 };
+#endif
+
+        dense::Vec< double, 8 > src;
+
+        for ( int r = r_cell; r <= r_cell + 1; r++ )
+        {
+            for ( int y = y_cell; y <= y_cell + 1; y++ )
+            {
+                for ( int x = x_cell; x <= x_cell + 1; x++ )
+                {
+                    const int x_local                          = x - x_cell;
+                    const int y_local                          = y - y_cell;
+                    const int r_local                          = r - r_cell;
+                    src( 4 * r_local + 2 * y_local + x_local ) = src_( local_subdomain_id, x, y, r );
+                }
+            }
+        }
+
+        // Later we will multiply all non-diagonal entries with row or column with that value.
+        dense::Mat< double, 8, 8 > boundary_mask;
+        boundary_mask.fill( 1.0 );
+
+        if ( treat_boundary_ )
+        {
+            for ( int r = r_cell; r <= r_cell + 1; r++ )
+            {
+                for ( int y = y_cell; y <= y_cell + 1; y++ )
+                {
+                    for ( int x = x_cell; x <= x_cell + 1; x++ )
+                    {
+                        const double factor = ( r == 0 || r == radii_.extent( 1 ) - 1 ) ? 0.0 : 1.0;
+
+                        const int x_local = x - x_cell;
+                        const int y_local = y - y_cell;
+                        const int r_local = r - r_cell;
+
+                        const int diag_entry = 4 * r_local + 2 * y_local + x_local;
+
+                        for ( int i = 0; i < 8; i++ )
+                        {
+                            if ( i != diag_entry )
+                            {
+                                boundary_mask( i, diag_entry ) *= factor;
+                                boundary_mask( diag_entry, i ) *= factor;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if ( diagonal_ )
+        {
+            for ( int i = 0; i < 8; i++ )
+            {
+                for ( int j = 0; j < 8; j++ )
+                {
+                    if ( i != j )
+                    {
+                        boundary_mask( i, j ) = 0.0;
+                    }
+                }
+            }
+        }
+
+        const auto src_0 = src( 0 );
+        const auto src_1 = src( 1 );
+        const auto src_2 = src( 2 );
+        const auto src_3 = src( 3 );
+        const auto src_4 = src( 4 );
+        const auto src_5 = src( 5 );
+        const auto src_6 = src( 6 );
+        const auto src_7 = src( 7 );
+
+        const auto r_inner = radii_( local_subdomain_id, r_cell );
+        const auto r_outer = radii_( local_subdomain_id, r_cell + 1 );
+
+        dense::Vec< double, 8 > dst;
+
+        for ( int qx = 0; qx < nq; qx++ )
+        {
+            for ( int qy = 0; qy < nq; qy++ )
+            {
+                for ( int qr = 0; qr < nq; qr++ )
+                {
+                    const double www = w[qx] * w[qy] * w[qr];
+
+                    const double qp0 = q[qx];
+                    const double qp1 = q[qy];
+                    const double qp2 = q[qr];
+
+                    // --- CSE temporaries ---
+                    double tmp_0  = qp1 - 1;
+                    double tmp_1  = -tmp_0;
+                    double tmp_2  = qp2 - 1;
+                    double tmp_3  = -tmp_2;
+                    double tmp_4  = qp1 + 1;
+                    double tmp_5  = qp2 + 1;
+                    double tmp_6  = ( 1.0 / 8.0 ) * r_inner;
+                    double tmp_7  = tmp_1 * tmp_6;
+                    double tmp_8  = tmp_3 * tmp_7;
+                    double tmp_9  = tmp_4 * tmp_6;
+                    double tmp_10 = tmp_3 * tmp_9;
+                    double tmp_11 = ( 1.0 / 8.0 ) * r_outer;
+                    double tmp_12 = tmp_1 * tmp_11 * tmp_5;
+                    double tmp_13 = tmp_11 * tmp_4;
+                    double tmp_14 = tmp_13 * tmp_5;
+                    double tmp_15 = tmp_14 * x_unit_3 - tmp_14 * x_unit_4;
+                    double tmp_16 = ( 1.0 / 8.0 ) * r_inner * tmp_1 * tmp_3 * x_unit_2 +
+                                    ( 1.0 / 8.0 ) * r_inner * tmp_3 * tmp_4 * x_unit_4 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_1 * tmp_5 * x_unit_2 - tmp_10 * x_unit_3 -
+                                    tmp_12 * x_unit_1 - tmp_15 - tmp_8 * x_unit_1;
+                    double tmp_17 = qp0 - 1;
+                    double tmp_18 = -tmp_17;
+                    double tmp_19 = qp0 + 1;
+                    double tmp_20 = tmp_3 * tmp_6;
+                    double tmp_21 = tmp_18 * y_unit_1;
+                    double tmp_22 = tmp_19 * y_unit_2;
+                    double tmp_23 = tmp_11 * tmp_5;
+                    double tmp_24 = tmp_19 * y_unit_4;
+                    double tmp_25 = tmp_22 * tmp_23 - tmp_23 * tmp_24;
+                    double tmp_26 = ( 1.0 / 8.0 ) * r_inner * tmp_18 * tmp_3 * y_unit_3 +
+                                    ( 1.0 / 8.0 ) * r_inner * tmp_19 * tmp_3 * y_unit_4 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_18 * tmp_5 * y_unit_3 - tmp_20 * tmp_21 -
+                                    tmp_20 * tmp_22 - tmp_21 * tmp_23 - tmp_25;
+                    double tmp_27 = tmp_16 * tmp_26;
+                    double tmp_28 = tmp_18 * x_unit_1;
+                    double tmp_29 = tmp_19 * x_unit_2;
+                    double tmp_30 = tmp_19 * x_unit_4;
+                    double tmp_31 = tmp_23 * tmp_29 - tmp_23 * tmp_30;
+                    double tmp_32 = ( 1.0 / 8.0 ) * r_inner * tmp_18 * tmp_3 * x_unit_3 +
+                                    ( 1.0 / 8.0 ) * r_inner * tmp_19 * tmp_3 * x_unit_4 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_18 * tmp_5 * x_unit_3 - tmp_20 * tmp_28 -
+                                    tmp_20 * tmp_29 - tmp_23 * tmp_28 - tmp_31;
+                    double tmp_33 = tmp_14 * y_unit_3 - tmp_14 * y_unit_4;
+                    double tmp_34 = ( 1.0 / 8.0 ) * r_inner * tmp_1 * tmp_3 * y_unit_2 +
+                                    ( 1.0 / 8.0 ) * r_inner * tmp_3 * tmp_4 * y_unit_4 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_1 * tmp_5 * y_unit_2 - tmp_10 * y_unit_3 -
+                                    tmp_12 * y_unit_1 - tmp_33 - tmp_8 * y_unit_1;
+                    double tmp_35 = tmp_32 * tmp_34;
+                    double tmp_36 = tmp_27 - tmp_35;
+                    double tmp_37 = tmp_18 * z_unit_1;
+                    double tmp_38 = tmp_19 * z_unit_2;
+                    double tmp_39 = tmp_19 * z_unit_4;
+                    double tmp_40 = tmp_23 * tmp_38 - tmp_23 * tmp_39;
+                    double tmp_41 = ( 1.0 / 8.0 ) * r_inner * tmp_18 * tmp_3 * z_unit_3 +
+                                    ( 1.0 / 8.0 ) * r_inner * tmp_19 * tmp_3 * z_unit_4 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_18 * tmp_5 * z_unit_3 - tmp_20 * tmp_37 -
+                                    tmp_20 * tmp_38 - tmp_23 * tmp_37 - tmp_40;
+                    double tmp_42 = -tmp_13 * tmp_30 + tmp_30 * tmp_9;
+                    double tmp_43 = ( 1.0 / 8.0 ) * r_outer * tmp_1 * tmp_18 * x_unit_1 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_1 * tmp_19 * x_unit_2 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_18 * tmp_4 * x_unit_3 - tmp_18 * tmp_9 * x_unit_3 -
+                                    tmp_28 * tmp_7 - tmp_29 * tmp_7 - tmp_42;
+                    double tmp_44 = tmp_34 * tmp_43;
+                    double tmp_45 = -tmp_13 * tmp_39 + tmp_39 * tmp_9;
+                    double tmp_46 = ( 1.0 / 8.0 ) * r_outer * tmp_1 * tmp_18 * z_unit_1 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_1 * tmp_19 * z_unit_2 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_18 * tmp_4 * z_unit_3 - tmp_18 * tmp_9 * z_unit_3 -
+                                    tmp_37 * tmp_7 - tmp_38 * tmp_7 - tmp_45;
+                    double tmp_47 = tmp_14 * z_unit_3 - tmp_14 * z_unit_4;
+                    double tmp_48 = ( 1.0 / 8.0 ) * r_inner * tmp_1 * tmp_3 * z_unit_2 +
+                                    ( 1.0 / 8.0 ) * r_inner * tmp_3 * tmp_4 * z_unit_4 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_1 * tmp_5 * z_unit_2 - tmp_10 * z_unit_3 -
+                                    tmp_12 * z_unit_1 - tmp_47 - tmp_8 * z_unit_1;
+                    double tmp_49 = -tmp_13 * tmp_24 + tmp_24 * tmp_9;
+                    double tmp_50 = ( 1.0 / 8.0 ) * r_outer * tmp_1 * tmp_18 * y_unit_1 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_1 * tmp_19 * y_unit_2 +
+                                    ( 1.0 / 8.0 ) * r_outer * tmp_18 * tmp_4 * y_unit_3 - tmp_18 * tmp_9 * y_unit_3 -
+                                    tmp_21 * tmp_7 - tmp_22 * tmp_7 - tmp_49;
+                    double tmp_51 = tmp_26 * tmp_43;
+                    double tmp_52 = tmp_16 * tmp_50;
+                    double tmp_53 = ( 1.0 / 8.0 ) / ( tmp_27 * tmp_46 + tmp_32 * tmp_48 * tmp_50 - tmp_35 * tmp_46 +
+                                                      tmp_41 * tmp_44 - tmp_41 * tmp_52 - tmp_48 * tmp_51 );
+                    double tmp_54 = tmp_1 * tmp_53;
+                    double tmp_55 = tmp_18 * tmp_54;
+                    double tmp_56 = tmp_36 * tmp_55;
+                    double tmp_57 = tmp_32 * tmp_50 - tmp_51;
+                    double tmp_58 = tmp_3 * tmp_54;
+                    double tmp_59 = tmp_57 * tmp_58;
+                    double tmp_60 = tmp_44 - tmp_52;
+                    double tmp_61 = tmp_3 * tmp_53;
+                    double tmp_62 = tmp_18 * tmp_61;
+                    double tmp_63 = tmp_60 * tmp_62;
+                    double tmp_64 = -tmp_56 - tmp_59 - tmp_63;
+                    double tmp_65 = -tmp_16 * tmp_41 + tmp_32 * tmp_48;
+                    double tmp_66 = tmp_55 * tmp_65;
+                    double tmp_67 = -tmp_32 * tmp_46 + tmp_41 * tmp_43;
+                    double tmp_68 = tmp_58 * tmp_67;
+                    double tmp_69 = tmp_16 * tmp_46 - tmp_43 * tmp_48;
+                    double tmp_70 = tmp_62 * tmp_69;
+                    double tmp_71 = -tmp_66 - tmp_68 - tmp_70;
+                    double tmp_72 = -tmp_26 * tmp_48 + tmp_34 * tmp_41;
+                    double tmp_73 = tmp_55 * tmp_72;
+                    double tmp_74 = tmp_26 * tmp_46 - tmp_41 * tmp_50;
+                    double tmp_75 = tmp_58 * tmp_74;
+                    double tmp_76 = -tmp_34 * tmp_46 + tmp_48 * tmp_50;
+                    double tmp_77 = tmp_62 * tmp_76;
+                    double tmp_78 = -tmp_73 - tmp_75 - tmp_77;
+                    double tmp_79 = tmp_0 * tmp_6;
+                    double tmp_80 = tmp_17 * x_unit_3;
+                    double tmp_81 = tmp_17 * x_unit_1;
+                    double tmp_82 = tmp_0 * tmp_11;
+                    double tmp_83 = tmp_13 * tmp_80 - tmp_29 * tmp_79 + tmp_29 * tmp_82 + tmp_42 + tmp_79 * tmp_81 -
+                                    tmp_80 * tmp_9 - tmp_81 * tmp_82;
+                    double tmp_84 = tmp_2 * tmp_79;
+                    double tmp_85 = tmp_2 * tmp_9;
+                    double tmp_86 = tmp_0 * tmp_23;
+                    double tmp_87 = tmp_33 + tmp_84 * y_unit_1 - tmp_84 * y_unit_2 - tmp_85 * y_unit_3 +
+                                    tmp_85 * y_unit_4 - tmp_86 * y_unit_1 + tmp_86 * y_unit_2;
+                    double tmp_88 = tmp_2 * tmp_6;
+                    double tmp_89 = tmp_17 * tmp_88;
+                    double tmp_90 = tmp_17 * tmp_23;
+                    double tmp_91 = -tmp_38 * tmp_88 + tmp_39 * tmp_88 + tmp_40 + tmp_89 * z_unit_1 -
+                                    tmp_89 * z_unit_3 - tmp_90 * z_unit_1 + tmp_90 * z_unit_3;
+                    double tmp_92 = tmp_15 + tmp_84 * x_unit_1 - tmp_84 * x_unit_2 - tmp_85 * x_unit_3 +
+                                    tmp_85 * x_unit_4 - tmp_86 * x_unit_1 + tmp_86 * x_unit_2;
+                    double tmp_93 = -tmp_22 * tmp_88 + tmp_24 * tmp_88 + tmp_25 + tmp_89 * y_unit_1 -
+                                    tmp_89 * y_unit_3 - tmp_90 * y_unit_1 + tmp_90 * y_unit_3;
+                    double tmp_94 = tmp_17 * z_unit_3;
+                    double tmp_95 = tmp_17 * z_unit_1;
+                    double tmp_96 = tmp_13 * tmp_94 - tmp_38 * tmp_79 + tmp_38 * tmp_82 + tmp_45 + tmp_79 * tmp_95 -
+                                    tmp_82 * tmp_95 - tmp_9 * tmp_94;
+                    double tmp_97 = tmp_23 * tmp_80 - tmp_23 * tmp_81 - tmp_29 * tmp_88 + tmp_30 * tmp_88 + tmp_31 -
+                                    tmp_80 * tmp_88 + tmp_81 * tmp_88;
+                    double tmp_98  = tmp_17 * y_unit_3;
+                    double tmp_99  = tmp_17 * y_unit_1;
+                    double tmp_100 = tmp_13 * tmp_98 - tmp_22 * tmp_79 + tmp_22 * tmp_82 + tmp_49 + tmp_79 * tmp_99 -
+                                     tmp_82 * tmp_99 - tmp_9 * tmp_98;
+                    double tmp_101 = tmp_47 + tmp_84 * z_unit_1 - tmp_84 * z_unit_2 - tmp_85 * z_unit_3 +
+                                     tmp_85 * z_unit_4 - tmp_86 * z_unit_1 + tmp_86 * z_unit_2;
+                    double tmp_102 =
+                        www * fabs(
+                                  tmp_100 * tmp_101 * tmp_97 - tmp_100 * tmp_91 * tmp_92 - tmp_101 * tmp_83 * tmp_93 +
+                                  tmp_83 * tmp_87 * tmp_91 - tmp_87 * tmp_96 * tmp_97 + tmp_92 * tmp_93 * tmp_96 );
+                    double tmp_103 = src_0 * tmp_102;
+                    double tmp_104 = src_7 * tmp_102;
+                    double tmp_105 = tmp_4 * tmp_53;
+                    double tmp_106 = tmp_105 * tmp_19;
+                    double tmp_107 = tmp_106 * tmp_36;
+                    double tmp_108 = tmp_105 * tmp_5;
+                    double tmp_109 = tmp_108 * tmp_57;
+                    double tmp_110 = tmp_5 * tmp_53;
+                    double tmp_111 = tmp_110 * tmp_19;
+                    double tmp_112 = tmp_111 * tmp_60;
+                    double tmp_113 = tmp_107 + tmp_109 + tmp_112;
+                    double tmp_114 = tmp_106 * tmp_65;
+                    double tmp_115 = tmp_108 * tmp_67;
+                    double tmp_116 = tmp_111 * tmp_69;
+                    double tmp_117 = tmp_114 + tmp_115 + tmp_116;
+                    double tmp_118 = tmp_106 * tmp_72;
+                    double tmp_119 = tmp_108 * tmp_74;
+                    double tmp_120 = tmp_111 * tmp_76;
+                    double tmp_121 = tmp_118 + tmp_119 + tmp_120;
+                    double tmp_122 = boundary_mask( 0, 7 ) * ( tmp_113 * tmp_64 + tmp_117 * tmp_71 + tmp_121 * tmp_78 );
+                    double tmp_123 = src_3 * tmp_102;
+                    double tmp_124 = tmp_4 * tmp_61;
+                    double tmp_125 = tmp_124 * tmp_57;
+                    double tmp_126 = tmp_19 * tmp_61;
+                    double tmp_127 = tmp_126 * tmp_60;
+                    double tmp_128 = -tmp_107 + tmp_125 + tmp_127;
+                    double tmp_129 = tmp_124 * tmp_67;
+                    double tmp_130 = tmp_126 * tmp_69;
+                    double tmp_131 = -tmp_114 + tmp_129 + tmp_130;
+                    double tmp_132 = tmp_124 * tmp_74;
+                    double tmp_133 = tmp_126 * tmp_76;
+                    double tmp_134 = -tmp_118 + tmp_132 + tmp_133;
+                    double tmp_135 = boundary_mask( 0, 3 ) * ( tmp_128 * tmp_64 + tmp_131 * tmp_71 + tmp_134 * tmp_78 );
+                    double tmp_136 = src_5 * tmp_102;
+                    double tmp_137 = tmp_19 * tmp_54;
+                    double tmp_138 = tmp_137 * tmp_36;
+                    double tmp_139 = tmp_5 * tmp_54;
+                    double tmp_140 = tmp_139 * tmp_57;
+                    double tmp_141 = -tmp_112 + tmp_138 + tmp_140;
+                    double tmp_142 = tmp_137 * tmp_65;
+                    double tmp_143 = tmp_139 * tmp_67;
+                    double tmp_144 = -tmp_116 + tmp_142 + tmp_143;
+                    double tmp_145 = tmp_137 * tmp_72;
+                    double tmp_146 = tmp_139 * tmp_74;
+                    double tmp_147 = -tmp_120 + tmp_145 + tmp_146;
+                    double tmp_148 = boundary_mask( 0, 5 ) * ( tmp_141 * tmp_64 + tmp_144 * tmp_71 + tmp_147 * tmp_78 );
+                    double tmp_149 = src_6 * tmp_102;
+                    double tmp_150 = tmp_105 * tmp_18;
+                    double tmp_151 = tmp_150 * tmp_36;
+                    double tmp_152 = tmp_110 * tmp_18;
+                    double tmp_153 = tmp_152 * tmp_60;
+                    double tmp_154 = -tmp_109 + tmp_151 + tmp_153;
+                    double tmp_155 = tmp_150 * tmp_65;
+                    double tmp_156 = tmp_152 * tmp_69;
+                    double tmp_157 = -tmp_115 + tmp_155 + tmp_156;
+                    double tmp_158 = tmp_150 * tmp_72;
+                    double tmp_159 = tmp_152 * tmp_76;
+                    double tmp_160 = -tmp_119 + tmp_158 + tmp_159;
+                    double tmp_161 = boundary_mask( 0, 6 ) * ( tmp_154 * tmp_64 + tmp_157 * tmp_71 + tmp_160 * tmp_78 );
+                    double tmp_162 = -tmp_127 - tmp_138 + tmp_59;
+                    double tmp_163 = -tmp_130 - tmp_142 + tmp_68;
+                    double tmp_164 = -tmp_133 - tmp_145 + tmp_75;
+                    double tmp_165 = boundary_mask( 0, 1 ) * ( tmp_162 * tmp_64 + tmp_163 * tmp_71 + tmp_164 * tmp_78 );
+                    double tmp_166 = src_1 * tmp_102;
+                    double tmp_167 = src_2 * tmp_102;
+                    double tmp_168 = -tmp_125 - tmp_151 + tmp_63;
+                    double tmp_169 = -tmp_129 - tmp_155 + tmp_70;
+                    double tmp_170 = -tmp_132 - tmp_158 + tmp_77;
+                    double tmp_171 = boundary_mask( 0, 2 ) * ( tmp_168 * tmp_64 + tmp_169 * tmp_71 + tmp_170 * tmp_78 );
+                    double tmp_172 = src_4 * tmp_102;
+                    double tmp_173 = -tmp_140 - tmp_153 + tmp_56;
+                    double tmp_174 = -tmp_143 - tmp_156 + tmp_66;
+                    double tmp_175 = -tmp_146 - tmp_159 + tmp_73;
+                    double tmp_176 = boundary_mask( 0, 4 ) * ( tmp_173 * tmp_64 + tmp_174 * tmp_71 + tmp_175 * tmp_78 );
+                    double tmp_177 =
+                        boundary_mask( 1, 7 ) * ( tmp_113 * tmp_162 + tmp_117 * tmp_163 + tmp_121 * tmp_164 );
+                    double tmp_178 =
+                        boundary_mask( 1, 3 ) * ( tmp_128 * tmp_162 + tmp_131 * tmp_163 + tmp_134 * tmp_164 );
+                    double tmp_179 =
+                        boundary_mask( 1, 5 ) * ( tmp_141 * tmp_162 + tmp_144 * tmp_163 + tmp_147 * tmp_164 );
+                    double tmp_180 =
+                        boundary_mask( 1, 6 ) * ( tmp_154 * tmp_162 + tmp_157 * tmp_163 + tmp_160 * tmp_164 );
+                    double tmp_181 =
+                        boundary_mask( 1, 2 ) * ( tmp_162 * tmp_168 + tmp_163 * tmp_169 + tmp_164 * tmp_170 );
+                    double tmp_182 =
+                        boundary_mask( 1, 4 ) * ( tmp_162 * tmp_173 + tmp_163 * tmp_174 + tmp_164 * tmp_175 );
+                    double tmp_183 =
+                        boundary_mask( 2, 7 ) * ( tmp_113 * tmp_168 + tmp_117 * tmp_169 + tmp_121 * tmp_170 );
+                    double tmp_184 =
+                        boundary_mask( 2, 3 ) * ( tmp_128 * tmp_168 + tmp_131 * tmp_169 + tmp_134 * tmp_170 );
+                    double tmp_185 =
+                        boundary_mask( 2, 5 ) * ( tmp_141 * tmp_168 + tmp_144 * tmp_169 + tmp_147 * tmp_170 );
+                    double tmp_186 =
+                        boundary_mask( 2, 6 ) * ( tmp_154 * tmp_168 + tmp_157 * tmp_169 + tmp_160 * tmp_170 );
+                    double tmp_187 =
+                        boundary_mask( 2, 4 ) * ( tmp_168 * tmp_173 + tmp_169 * tmp_174 + tmp_170 * tmp_175 );
+                    double tmp_188 =
+                        boundary_mask( 3, 7 ) * ( tmp_113 * tmp_128 + tmp_117 * tmp_131 + tmp_121 * tmp_134 );
+                    double tmp_189 =
+                        boundary_mask( 3, 5 ) * ( tmp_128 * tmp_141 + tmp_131 * tmp_144 + tmp_134 * tmp_147 );
+                    double tmp_190 =
+                        boundary_mask( 3, 6 ) * ( tmp_128 * tmp_154 + tmp_131 * tmp_157 + tmp_134 * tmp_160 );
+                    double tmp_191 =
+                        boundary_mask( 3, 4 ) * ( tmp_128 * tmp_173 + tmp_131 * tmp_174 + tmp_134 * tmp_175 );
+                    double tmp_192 =
+                        boundary_mask( 4, 7 ) * ( tmp_113 * tmp_173 + tmp_117 * tmp_174 + tmp_121 * tmp_175 );
+                    double tmp_193 =
+                        boundary_mask( 4, 5 ) * ( tmp_141 * tmp_173 + tmp_144 * tmp_174 + tmp_147 * tmp_175 );
+                    double tmp_194 =
+                        boundary_mask( 4, 6 ) * ( tmp_154 * tmp_173 + tmp_157 * tmp_174 + tmp_160 * tmp_175 );
+                    double tmp_195 =
+                        boundary_mask( 5, 7 ) * ( tmp_113 * tmp_141 + tmp_117 * tmp_144 + tmp_121 * tmp_147 );
+                    double tmp_196 =
+                        boundary_mask( 5, 6 ) * ( tmp_141 * tmp_154 + tmp_144 * tmp_157 + tmp_147 * tmp_160 );
+                    double tmp_197 =
+                        boundary_mask( 6, 7 ) * ( tmp_113 * tmp_154 + tmp_117 * tmp_157 + tmp_121 * tmp_160 );
+                    dst( 0 ) = boundary_mask( 0, 0 ) * tmp_103 *
+                                   ( ( tmp_64 * tmp_64 ) + ( tmp_71 * tmp_71 ) + ( tmp_78 * tmp_78 ) ) +
+                               tmp_104 * tmp_122 + tmp_123 * tmp_135 + tmp_136 * tmp_148 + tmp_149 * tmp_161 +
+                               tmp_165 * tmp_166 + tmp_167 * tmp_171 + tmp_172 * tmp_176;
+                    dst( 1 ) = boundary_mask( 1, 1 ) * tmp_166 *
+                                   ( ( tmp_162 * tmp_162 ) + ( tmp_163 * tmp_163 ) + ( tmp_164 * tmp_164 ) ) +
+                               tmp_103 * tmp_165 + tmp_104 * tmp_177 + tmp_123 * tmp_178 + tmp_136 * tmp_179 +
+                               tmp_149 * tmp_180 + tmp_167 * tmp_181 + tmp_172 * tmp_182;
+                    dst( 2 ) = boundary_mask( 2, 2 ) * tmp_167 *
+                                   ( ( tmp_168 * tmp_168 ) + ( tmp_169 * tmp_169 ) + ( tmp_170 * tmp_170 ) ) +
+                               tmp_103 * tmp_171 + tmp_104 * tmp_183 + tmp_123 * tmp_184 + tmp_136 * tmp_185 +
+                               tmp_149 * tmp_186 + tmp_166 * tmp_181 + tmp_172 * tmp_187;
+                    dst( 3 ) = boundary_mask( 3, 3 ) * tmp_123 *
+                                   ( ( tmp_128 * tmp_128 ) + ( tmp_131 * tmp_131 ) + ( tmp_134 * tmp_134 ) ) +
+                               tmp_103 * tmp_135 + tmp_104 * tmp_188 + tmp_136 * tmp_189 + tmp_149 * tmp_190 +
+                               tmp_166 * tmp_178 + tmp_167 * tmp_184 + tmp_172 * tmp_191;
+                    dst( 4 ) = boundary_mask( 4, 4 ) * tmp_172 *
+                                   ( ( tmp_173 * tmp_173 ) + ( tmp_174 * tmp_174 ) + ( tmp_175 * tmp_175 ) ) +
+                               tmp_103 * tmp_176 + tmp_104 * tmp_192 + tmp_123 * tmp_191 + tmp_136 * tmp_193 +
+                               tmp_149 * tmp_194 + tmp_166 * tmp_182 + tmp_167 * tmp_187;
+                    dst( 5 ) = boundary_mask( 5, 5 ) * tmp_136 *
+                                   ( ( tmp_141 * tmp_141 ) + ( tmp_144 * tmp_144 ) + ( tmp_147 * tmp_147 ) ) +
+                               tmp_103 * tmp_148 + tmp_104 * tmp_195 + tmp_123 * tmp_189 + tmp_149 * tmp_196 +
+                               tmp_166 * tmp_179 + tmp_167 * tmp_185 + tmp_172 * tmp_193;
+                    dst( 6 ) = boundary_mask( 6, 6 ) * tmp_149 *
+                                   ( ( tmp_154 * tmp_154 ) + ( tmp_157 * tmp_157 ) + ( tmp_160 * tmp_160 ) ) +
+                               tmp_103 * tmp_161 + tmp_104 * tmp_197 + tmp_123 * tmp_190 + tmp_136 * tmp_196 +
+                               tmp_166 * tmp_180 + tmp_167 * tmp_186 + tmp_172 * tmp_194;
+                    dst( 7 ) = boundary_mask( 7, 7 ) * tmp_104 *
+                                   ( ( tmp_113 * tmp_113 ) + ( tmp_117 * tmp_117 ) + ( tmp_121 * tmp_121 ) ) +
+                               tmp_103 * tmp_122 + tmp_123 * tmp_188 + tmp_136 * tmp_195 + tmp_149 * tmp_197 +
+                               tmp_166 * tmp_177 + tmp_167 * tmp_183 + tmp_172 * tmp_192;
+
+                    for ( int r = r_cell; r <= r_cell + 1; r++ )
+                    {
+                        for ( int y = y_cell; y <= y_cell + 1; y++ )
+                        {
+                            for ( int x = x_cell; x <= x_cell + 1; x++ )
+                            {
+                                const int x_local = x - x_cell;
+                                const int y_local = y - y_cell;
+                                const int r_local = r - r_cell;
+
+                                Kokkos::atomic_add(
+                                    &dst_( local_subdomain_id, x, y, r ), dst( 4 * r_local + 2 * y_local + x_local ) );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+};
+
+struct LaplaceOperatorWedge
+{
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+
+    Grid4DDataScalar< double > src_;
+    Grid4DDataScalar< double > dst_;
+    bool                       treat_boundary_;
+    bool                       diagonal_;
+
+    LaplaceOperatorWedge(
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataScalar< double >& src,
+        const Grid4DDataScalar< double >& dst,
+        const bool                        treat_boundary,
+        const bool                        diagonal )
+    : grid_( grid )
+    , radii_( radii )
+    , src_( src )
+    , dst_( dst )
+    , treat_boundary_( treat_boundary )
+    , diagonal_( diagonal )
+    {}
+
+    KOKKOS_INLINE_FUNCTION void
+        operator()( const int local_subdomain_id, const int x_cell, const int y_cell, const int r_cell ) const
+    {
+        // First all the r-independent stuff.
+        // Gather surface points for each wedge.
+        constexpr int num_wedges = 2;
+
+        // Extract vertex positions of quad
+        // (0, 0), (1, 0), (0, 1), (1, 1).
+        dense::Vec< double, 3 > quad_surface_coords[2][2];
+
+        for ( int x = x_cell; x <= x_cell + 1; x++ )
+        {
+            for ( int y = y_cell; y <= y_cell + 1; y++ )
+            {
+                for ( int d = 0; d < 3; d++ )
+                {
+                    quad_surface_coords[x - x_cell][y - y_cell]( d ) = grid_( local_subdomain_id, x, y, d );
+                }
+            }
+        }
+
+        // Sort coords for the two wedge surfaces.
+        dense::Vec< double, 3 > wedge_phy_surf[num_wedges][3] = {};
+
+        wedge_phy_surf[0][0] = quad_surface_coords[0][0];
+        wedge_phy_surf[0][1] = quad_surface_coords[1][0];
+        wedge_phy_surf[0][2] = quad_surface_coords[0][1];
+
+        wedge_phy_surf[1][0] = quad_surface_coords[1][1];
+        wedge_phy_surf[1][1] = quad_surface_coords[0][1];
+        wedge_phy_surf[1][2] = quad_surface_coords[1][0];
+
+        // Compute lateral part of Jacobian.
+        // For now, we only do this at a single quad point.
+
+#if 0
+        constexpr int    nq              = 2;
+        constexpr double one_over_sqrt_3 = 0.57735026918962576450914878050195745564760175127012687601860232648397767230;
+        constexpr dense::Vec< double, 3 > qp[nq] = {
+            { 1.0 / 3.0, 1.0 / 3.0, -one_over_sqrt_3 }, { 1.0 / 3.0, 1.0 / 3.0, one_over_sqrt_3 } };
+        constexpr double qw[nq] = { 1.0, 1.0 };
+#endif
+
+#if 1
+        constexpr int                     nq     = 1;
+        constexpr dense::Vec< double, 3 > qp[nq] = { { 1.0 / 3.0, 1.0 / 3.0, 0.0 } };
+        constexpr double                  qw[nq] = { 1.0 };
+#endif
+
+#if 0
+
+        constexpr int                     nq     = 6;
+        constexpr dense::Vec< double, 3 > qp[nq] = {
+            { { 0.6666666666666666, 0.1666666666666667, -0.5773502691896257 } },
+            { { 0.1666666666666667, 0.6666666666666666, -0.5773502691896257 } },
+            { { 0.1666666666666667, 0.1666666666666667, -0.5773502691896257 } },
+            { { 0.6666666666666666, 0.1666666666666667, 0.5773502691896257 } },
+            { { 0.1666666666666667, 0.6666666666666666, 0.5773502691896257 } },
+            { { 0.1666666666666667, 0.1666666666666667, 0.5773502691896257 } } };
+        constexpr double qw[nq] = {
+            0.1666666666666667,
+            0.1666666666666667,
+            0.1666666666666667,
+            0.1666666666666667,
+            0.1666666666666667,
+            0.1666666666666667 };
+#endif
+
+        dense::Mat< double, 3, 3 > jac_lat_inv_t[num_wedges][nq] = {};
+        double                     det_jac_lat[num_wedges][nq]   = {};
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int q = 0; q < nq; q++ )
+            {
+                const auto jac_lat = fe::wedge::jac_lat(
+                    wedge_phy_surf[wedge][0],
+                    wedge_phy_surf[wedge][1],
+                    wedge_phy_surf[wedge][2],
+                    qp[q]( 0 ),
+                    qp[q]( 1 ) );
+
+                det_jac_lat[wedge][q] = Kokkos::abs( jac_lat.det() );
+
+                jac_lat_inv_t[wedge][q] = jac_lat.inv().transposed();
+            }
+        }
+
+        constexpr int num_nodes_per_wedge = 6;
+
+        // Let's now gather all the shape functions and gradients we need.
+        double shape_lat[num_wedges][num_nodes_per_wedge][nq] = {};
+        double shape_rad[num_wedges][num_nodes_per_wedge][nq] = {};
+
+        double grad_shape_lat_xi[num_wedges][num_nodes_per_wedge]  = {};
+        double grad_shape_lat_eta[num_wedges][num_nodes_per_wedge] = {};
+        double grad_shape_rad[num_wedges][num_nodes_per_wedge]     = {};
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int node_idx = 0; node_idx < num_nodes_per_wedge; node_idx++ )
+            {
+                for ( int q = 0; q < nq; q++ )
+                {
+                    shape_lat[wedge][node_idx][q] = fe::wedge::shape_lat( qp[q]( 0 ), qp[q]( 1 ) )( node_idx % 3 );
+                    shape_rad[wedge][node_idx][q] = fe::wedge::shape_rad( qp[q]( 2 ) )( node_idx / 3 );
+                }
+
+                grad_shape_lat_xi[wedge][node_idx]  = fe::wedge::grad_shape_lat_xi()( node_idx % 3 );
+                grad_shape_lat_eta[wedge][node_idx] = fe::wedge::grad_shape_lat_eta()( node_idx % 3 );
+                grad_shape_rad[wedge][node_idx]     = fe::wedge::grad_shape_rad()( node_idx / 3 );
+            }
+        }
+
+        dense::Vec< double, 3 > g_rad[num_wedges][num_nodes_per_wedge][nq] = {};
+        dense::Vec< double, 3 > g_lat[num_wedges][num_nodes_per_wedge][nq] = {};
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int node_idx = 0; node_idx < num_nodes_per_wedge; node_idx++ )
+            {
+                for ( int q = 0; q < nq; q++ )
+                {
+                    g_rad[wedge][node_idx][q] = jac_lat_inv_t[wedge][q] *
+                                                dense::Vec< double, 3 >{
+                                                    grad_shape_lat_xi[wedge][node_idx] * shape_rad[wedge][node_idx][q],
+                                                    grad_shape_lat_eta[wedge][node_idx] * shape_rad[wedge][node_idx][q],
+                                                    0.0 };
+
+                    g_lat[wedge][node_idx][q] =
+                        jac_lat_inv_t[wedge][q] * dense::Vec< double, 3 >{ 0.0, 0.0, shape_lat[wedge][node_idx][q] };
+                }
+            }
+        }
+
+        // Only now we introduce radially dependent terms.
+        const double r_1 = radii_( local_subdomain_id, r_cell );
+        const double r_2 = radii_( local_subdomain_id, r_cell + 1 );
+
+        // For now, compute the local element matrix. We'll improve that later.
+        dense::Mat< double, 6, 6 > A[num_wedges] = {};
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int q = 0; q < nq; q++ )
+            {
+                const double r = fe::wedge::forward_map_rad( r_1, r_2, qp[q]( 2 ) );
+                // TODO: we can precompute that per quadrature point to avoid the division.
+                const double r_inv = 1.0 / r;
+
+                const double grad_r = fe::wedge::grad_forward_map_rad( r_1, r_2 );
+                // TODO: we can precompute that per quadrature point to avoid the division.
+                const double grad_r_inv = 1.0 / grad_r;
+
+                for ( int i = 0; i < num_nodes_per_wedge; i++ )
+                {
+                    for ( int j = 0; j < num_nodes_per_wedge; j++ )
+                    {
+                        const dense::Vec< double, 3 > grad_i =
+                            r_inv * g_rad[wedge][i][q] + grad_shape_rad[wedge][i] * grad_r_inv * g_lat[wedge][i][q];
+                        const dense::Vec< double, 3 > grad_j =
+                            r_inv * g_rad[wedge][j][q] + grad_shape_rad[wedge][j] * grad_r_inv * g_lat[wedge][j][q];
+
+                        A[wedge]( i, j ) += qw[q] * ( grad_i.dot( grad_j ) * r * r * grad_r * det_jac_lat[wedge][q] );
+                    }
+                }
+            }
+        }
+
+        if ( treat_boundary_ )
+        {
+            for ( int wedge = 0; wedge < num_wedges; wedge++ )
+            {
+                dense::Mat< double, 6, 6 > boundary_mask;
+                boundary_mask.fill( 1.0 );
+                if ( r_cell == 0 )
+                {
+                    // Inner boundary (CMB).
+                    for ( int i = 0; i < 6; i++ )
+                    {
+                        for ( int j = 0; j < 6; j++ )
+                        {
+                            if ( i != j && ( i < 3 || j < 3 ) )
+                            {
+                                boundary_mask( i, j ) = 0.0;
+                            }
+                        }
+                    }
+                }
+
+                if ( r_cell + 1 == radii_.extent( 1 ) - 1 )
+                {
+                    // Outer boundary (surface).
+                    for ( int i = 0; i < 6; i++ )
+                    {
+                        for ( int j = 0; j < 6; j++ )
+                        {
+                            if ( i != j && ( i >= 3 || j >= 3 ) )
+                            {
+                                boundary_mask( i, j ) = 0.0;
+                            }
+                        }
+                    }
+                }
+
+                A[wedge].hadamard_product( boundary_mask );
+            }
+        }
+
+        if ( diagonal_ )
+        {
+            for ( int wedge = 0; wedge < num_wedges; wedge++ )
+            {
+                for ( int i = 0; i < 6; i++ )
+                {
+                    for ( int j = 0; j < 6; j++ )
+                    {
+                        if ( i != j )
+                        {
+                            A[wedge]( i, j ) = 0.0;
+                        }
+                    }
+                }
+            }
+        }
+
+        dense::Vec< double, 6 > src[num_wedges];
+
+        src[0]( 0 ) = src_( local_subdomain_id, x_cell, y_cell, r_cell );
+        src[0]( 1 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell );
+        src[0]( 2 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell );
+        src[0]( 3 ) = src_( local_subdomain_id, x_cell, y_cell, r_cell + 1 );
+        src[0]( 4 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 );
+        src[0]( 5 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 );
+
+        src[1]( 0 ) = src_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell );
+        src[1]( 1 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell );
+        src[1]( 2 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell );
+        src[1]( 3 ) = src_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell + 1 );
+        src[1]( 4 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 );
+        src[1]( 5 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 );
+
+        dense::Vec< double, 6 > dst[num_wedges];
+
+        dst[0] = A[0] * src[0];
+        dst[1] = A[1] * src[1];
+
+        // std::cout << A[0] << std::endl;
+        // std::cout << A[1] << std::endl;
+
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell, r_cell ), dst[0]( 0 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell ), dst[0]( 1 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell ), dst[0]( 2 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell, r_cell + 1 ), dst[0]( 3 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 ), dst[0]( 4 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 ), dst[0]( 5 ) );
+
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell ), dst[1]( 0 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell ), dst[1]( 1 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell ), dst[1]( 2 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell + 1 ), dst[1]( 3 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 ), dst[1]( 4 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 ), dst[1]( 5 ) );
+    }
+};
+
 // x = x + wI * ( b - Ax )
 void richardson_step(
     const DistributedDomain&          domain,
@@ -551,7 +1315,7 @@ void richardson_step(
 
 void single_apply()
 {
-    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 2, 2, 0.5, 1.0 );
+    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 3, 3, 0.5, 1.0 );
 
     const auto src = grid::shell::allocate_scalar_grid( "src", domain );
     const auto dst = grid::shell::allocate_scalar_grid( "dst", domain );
@@ -565,20 +1329,18 @@ void single_apply()
     const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
     const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
 
-#if 0
     Kokkos::parallel_for(
         "solution interpolation",
         local_domain_md_range_policy_nodes( domain ),
         SolutionInterpolator( subdomain_shell_coords, subdomain_radii, src, false ) );
-#endif
 
-    kernels::common::set_constant( dst, 1.0 );
+    // kernels::common::set_constant( dst, 1.0 );
 
-#if 0
+#if 1
     Kokkos::parallel_for(
         "matvec",
         grid::shell::local_domain_md_range_policy_cells( domain ),
-        LaplaceOperator( subdomain_shell_coords, subdomain_radii, src, dst, false, false ) );
+        LaplaceOperatorWedge( subdomain_shell_coords, subdomain_radii, src, dst, false, false ) );
 #endif
 
 #if 1
@@ -592,10 +1354,8 @@ void single_apply()
         domain, dst, recv_buffers, expected_recvs_requests, expected_recvs_metadata );
 #endif
 
-    Kokkos::fence();
-
     terra::vtk::VTKOutput vtk_after( subdomain_shell_coords, subdomain_radii, "laplace_apply.vtu", false );
-    // vtk_after.add_scalar_field( src.label(), src );
+    vtk_after.add_scalar_field( src.label(), src );
     vtk_after.add_scalar_field( dst.label(), dst );
     vtk_after.write();
 }
@@ -604,6 +1364,8 @@ void single_apply()
 
 void all_diamonds()
 {
+    using LaplaceOperator = LaplaceOperatorWedge;
+
     /**
 
     Boundary handling notes.
@@ -627,7 +1389,7 @@ void all_diamonds()
 
     **/
 
-    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 5, 5, 0.5, 1.0 );
+    const auto domain = grid::shell::DistributedDomain::create_uniform_single_subdomain( 4, 4, 0.5, 1.0 );
 
     const auto u        = grid::shell::allocate_scalar_grid( "u", domain );
     const auto g        = grid::shell::allocate_scalar_grid( "g", domain );
@@ -691,16 +1453,16 @@ void all_diamonds()
 
     // Solve.
 
-    const double omega = 0.3;
+    const double omega = 0.2;
 
     double duration_matvec_sum = 0;
     double duration_iter_sum   = 0;
 
-    const int iterations = 100;
+    const int iterations = 10000;
 
     for ( int iter = 0; iter < iterations; iter++ )
     {
-        if ( iter % 10 == 0 )
+        if ( iter % 100 == 0 )
         {
             std::cout << "iter = " << iter;
             const bool comp_norm = true;
