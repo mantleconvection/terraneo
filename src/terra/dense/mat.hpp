@@ -14,30 +14,34 @@ struct Mat
 
     static_assert( Rows > 0 && Cols > 0, "Matrix dimensions must be positive" );
 
-    // Construct from columns (specialized for 2x2 and 3x3)
     KOKKOS_INLINE_FUNCTION
-    constexpr Mat( const Vec< T, Rows >& col0, const Vec< T, Rows >& col1 )
+    constexpr static Mat from_col_vecs( const Vec< T, Rows >& col0, const Vec< T, Rows >& col1 )
     {
         static_assert( Rows == 2 && Cols == 2, "This constructor is only for 2x2 matrices" );
-        data[0][0] = col0( 0 );
-        data[0][1] = col1( 0 );
-        data[1][0] = col0( 1 );
-        data[1][1] = col1( 1 );
+        Mat mat;
+        mat.data[0][0] = col0( 0 );
+        mat.data[0][1] = col1( 0 );
+        mat.data[1][0] = col0( 1 );
+        mat.data[1][1] = col1( 1 );
+        return mat;
     }
 
     KOKKOS_INLINE_FUNCTION
-    constexpr Mat( const Vec< T, Rows >& col0, const Vec< T, Rows >& col1, const Vec< T, Rows >& col2 )
+    constexpr static Mat
+        from_col_vecs( const Vec< T, Rows >& col0, const Vec< T, Rows >& col1, const Vec< T, Rows >& col2 )
     {
         static_assert( Rows == 3 && Cols == 3, "This constructor is only for 3x3 matrices" );
-        data[0][0] = col0( 0 );
-        data[0][1] = col1( 0 );
-        data[0][2] = col2( 0 );
-        data[1][0] = col0( 1 );
-        data[1][1] = col1( 1 );
-        data[1][2] = col2( 1 );
-        data[2][0] = col0( 2 );
-        data[2][1] = col1( 2 );
-        data[2][2] = col2( 2 );
+        Mat mat;
+        mat.data[0][0] = col0( 0 );
+        mat.data[0][1] = col1( 0 );
+        mat.data[0][2] = col2( 0 );
+        mat.data[1][0] = col0( 1 );
+        mat.data[1][1] = col1( 1 );
+        mat.data[1][2] = col2( 1 );
+        mat.data[2][0] = col0( 2 );
+        mat.data[2][1] = col1( 2 );
+        mat.data[2][2] = col2( 2 );
+        return mat;
     }
 
     KOKKOS_INLINE_FUNCTION
@@ -189,8 +193,6 @@ struct Mat
             static_assert( Rows == -1, "inv() only implemented for 2x2 and 3x3 matrices" );
         }
     }
-
-    Mat() = default;
 };
 
 template < typename T, int Rows, int Cols >

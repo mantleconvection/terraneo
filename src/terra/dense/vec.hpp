@@ -9,10 +9,6 @@ struct Vec
 {
     T data[N] = {};
 
-    Vec() = default;
-
-    constexpr Vec( std::initializer_list< T > init ) { std::copy( init.begin(), init.end(), data ); }
-
     KOKKOS_INLINE_FUNCTION
     T& operator()( int i ) { return data[i]; }
 
@@ -98,7 +94,9 @@ struct Vec
     }
 };
 
+
 template < typename T, int N >
+KOKKOS_INLINE_FUNCTION
 constexpr Vec< T, N > operator*( const Vec< T, N >& v, const T scalar ) noexcept
 {
     Vec< T, N > result{};
@@ -108,6 +106,7 @@ constexpr Vec< T, N > operator*( const Vec< T, N >& v, const T scalar ) noexcept
 }
 
 template < typename T, int N >
+KOKKOS_INLINE_FUNCTION
 constexpr Vec< T, N > operator*( const T scalar, const Vec< T, N >& v ) noexcept
 {
     Vec< T, N > result{};

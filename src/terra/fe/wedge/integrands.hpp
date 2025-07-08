@@ -114,7 +114,7 @@ constexpr dense::Mat< double, 3, 3 > jac_lat(
     const auto col_0 = grad_forward_map_lat_xi( p1_phy, p2_phy, p3_phy );
     const auto col_1 = grad_forward_map_lat_eta( p1_phy, p2_phy, p3_phy );
     const auto col_2 = forward_map_lat( p1_phy, p2_phy, p3_phy, xi, eta );
-    return dense::Mat< double, 3, 3 >{ col_0, col_1, col_2 };
+    return dense::Mat< double, 3, 3 >::from_col_vecs( col_0, col_1, col_2 );
 }
 
 KOKKOS_INLINE_FUNCTION
