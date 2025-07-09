@@ -288,7 +288,8 @@ void recv_unpack_and_add_local_subdomain_boundaries(
     const grid::Grid4DDataScalar< double >& data,
     SubdomainNeighborhoodRecvBuffer&        boundary_recv_buffers,
     std::vector< MPI_Request >&             metadata_recv_requests,
-    std::vector< std::array< int, 11 > >&   metadata_recv_buffers )
+    std::vector< std::array< int, 11 > >&   metadata_recv_buffers,
+    CommuncationReduction                   reduction )
 {
     if ( metadata_recv_requests.size() != metadata_recv_buffers.size() )
     {
@@ -360,7 +361,16 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                 "add_boundary_edge_" + to_string( receiver_boundary_edge ),
                                 Kokkos::RangePolicy( 0, recv_buffer.extent( 0 ) ),
                                 KOKKOS_LAMBDA( const int idx ) {
-                                    Kokkos::atomic_add( &data( local_subdomain_id, 0, 0, idx ), recv_buffer( idx ) );
+                                    if ( reduction == CommuncationReduction::SUM )
+                                    {
+                                        Kokkos::atomic_add(
+                                            &data( local_subdomain_id, 0, 0, idx ), recv_buffer( idx ) );
+                                    }
+                                    else if ( reduction == CommuncationReduction::MIN )
+                                    {
+                                        Kokkos::atomic_min(
+                                            &data( local_subdomain_id, 0, 0, idx ), recv_buffer( idx ) );
+                                    }
                                 } );
                             break;
                         default:
@@ -402,8 +412,16 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                 "add_boundary_face_" + to_string( receiver_boundary_face ),
                                 Kokkos::MDRangePolicy( { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
                                 KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
-                                    Kokkos::atomic_add(
-                                        &data( local_subdomain_id, 0, idx_i, idx_j ), recv_buffer( idx_i, idx_j ) );
+                                    if ( reduction == CommuncationReduction::SUM )
+                                    {
+                                        Kokkos::atomic_add(
+                                            &data( local_subdomain_id, 0, idx_i, idx_j ), recv_buffer( idx_i, idx_j ) );
+                                    }
+                                    else if ( reduction == CommuncationReduction::MIN )
+                                    {
+                                        Kokkos::atomic_min(
+                                            &data( local_subdomain_id, 0, idx_i, idx_j ), recv_buffer( idx_i, idx_j ) );
+                                    }
                                 } );
                             break;
                         case grid::BoundaryFace::F_X0R:
@@ -411,8 +429,16 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                 "add_boundary_face_" + to_string( receiver_boundary_face ),
                                 Kokkos::MDRangePolicy( { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
                                 KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
-                                    Kokkos::atomic_add(
-                                        &data( local_subdomain_id, idx_i, 0, idx_j ), recv_buffer( idx_i, idx_j ) );
+                                    if ( reduction == CommuncationReduction::SUM )
+                                    {
+                                        Kokkos::atomic_add(
+                                            &data( local_subdomain_id, idx_i, 0, idx_j ), recv_buffer( idx_i, idx_j ) );
+                                    }
+                                    else if ( reduction == CommuncationReduction::MIN )
+                                    {
+                                        Kokkos::atomic_min(
+                                            &data( local_subdomain_id, idx_i, 0, idx_j ), recv_buffer( idx_i, idx_j ) );
+                                    }
                                 } );
                             break;
 
@@ -421,9 +447,18 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                 "add_boundary_face_" + to_string( receiver_boundary_face ),
                                 Kokkos::MDRangePolicy( { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
                                 KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
-                                    Kokkos::atomic_add(
-                                        &data( local_subdomain_id, data.extent( 1 ) - 1, idx_i, idx_j ),
-                                        recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j ) );
+                                    if ( reduction == CommuncationReduction::SUM )
+                                    {
+                                        Kokkos::atomic_add(
+                                            &data( local_subdomain_id, data.extent( 1 ) - 1, idx_i, idx_j ),
+                                            recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j ) );
+                                    }
+                                    else if ( reduction == CommuncationReduction::MIN )
+                                    {
+                                        Kokkos::atomic_min(
+                                            &data( local_subdomain_id, data.extent( 1 ) - 1, idx_i, idx_j ),
+                                            recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j ) );
+                                    }
                                 } );
                             break;
                         case grid::BoundaryFace::F_X1R:
@@ -431,9 +466,18 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                 "add_boundary_face_" + to_string( receiver_boundary_face ),
                                 Kokkos::MDRangePolicy( { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
                                 KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
-                                    Kokkos::atomic_add(
-                                        &data( local_subdomain_id, idx_i, data.extent( 2 ) - 1, idx_j ),
-                                        recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j ) );
+                                    if ( reduction == CommuncationReduction::SUM )
+                                    {
+                                        Kokkos::atomic_add(
+                                            &data( local_subdomain_id, idx_i, data.extent( 2 ) - 1, idx_j ),
+                                            recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j ) );
+                                    }
+                                    else if ( reduction == CommuncationReduction::MIN )
+                                    {
+                                        Kokkos::atomic_min(
+                                            &data( local_subdomain_id, idx_i, data.extent( 2 ) - 1, idx_j ),
+                                            recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j ) );
+                                    }
                                 } );
                             break;
                         default:

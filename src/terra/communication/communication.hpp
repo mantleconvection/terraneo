@@ -1,4 +1,5 @@
 #pragma once
+
 #include <iostream>
 #include <ranges>
 #include <variant>
@@ -51,7 +52,7 @@ class SubdomainNeighborhoodSendBuffer
 /// boundaries). Can technically be reused for any grid data instance (we do not need extra buffers for each FE function
 /// so to speak - just reuse the same instance of this class to save memory).
 ///
-/// This is different than the SubdomainNeighborhoodSendBuffer as possible more than one buffer is needed per process-
+/// This is different than the SubdomainNeighborhoodSendBuffer as possibly more than one buffer is needed per process-
 /// local subdomain boundary. Since we mostly perform additive communication, we receive the data into the buffers from
 /// potentially multiple overlapping neighbor boundaries, and then later add.
 class SubdomainNeighborhoodRecvBuffer
@@ -182,6 +183,12 @@ struct RecvRequestBoundaryInfo
 
 } // namespace detail
 
+enum class CommuncationReduction
+{
+    SUM,
+    MIN
+};
+
 /// @brief Posts metadata receives, packs data into send buffers, sends data to neighboring subdomains.
 void pack_and_send_local_subdomain_boundaries(
     const grid::shell::DistributedDomain&   domain,
@@ -196,6 +203,7 @@ void recv_unpack_and_add_local_subdomain_boundaries(
     const grid::Grid4DDataScalar< double >& data,
     SubdomainNeighborhoodRecvBuffer&        boundary_recv_buffers,
     std::vector< MPI_Request >&             metadata_recv_requests,
-    std::vector< std::array< int, 11 > >&   metadata_recv_buffers );
+    std::vector< std::array< int, 11 > >&   metadata_recv_buffers,
+    CommuncationReduction                   reduction = CommuncationReduction::SUM );
 
 } // namespace terra::communication

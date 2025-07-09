@@ -40,6 +40,21 @@ class SubdomainInfo
                std::tie( other.diamond_id_, other.subdomain_r_, other.subdomain_y_, other.subdomain_x_ );
     }
 
+    int global_id() const
+    {
+        if ( diamond_id_ >= 10 )
+        {
+            throw std::logic_error( "Diamond ID must be less than 10." );
+        }
+
+        if ( subdomain_x_ > 511 || subdomain_y_ > 511 || subdomain_r_ > 511 )
+        {
+            throw std::logic_error( "Subdomain indices too large." );
+        }
+
+        return ( diamond_id_ << 27 ) | ( subdomain_r_ << 18 ) | ( subdomain_y_ << 9 ) | ( subdomain_x_ );
+    }
+
   private:
     /// Diamond that subdomain is part of.
     int diamond_id_;
@@ -316,10 +331,11 @@ class DistributedDomain
     std::map< SubdomainInfo, std::tuple< LocalSubdomainIdx, SubdomainNeighborhood > > subdomains_;
 };
 
-inline Grid4DDataScalar< double >
+template < typename ValueType >
+inline Grid4DDataScalar< ValueType >
     allocate_scalar_grid( const std::string label, const DistributedDomain& distributed_domain )
 {
-    return Grid4DDataScalar< double >(
+    return Grid4DDataScalar< ValueType >(
         label,
         distributed_domain.subdomains().size(),
         distributed_domain.domain_info().subdomain_num_nodes_per_side_laterally(),

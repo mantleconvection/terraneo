@@ -9,6 +9,7 @@ function(add_terra_test name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+add_terra_test(test_flag_field_unique_vertices)
 add_terra_test(test_mesh)
 add_terra_test(test_laplace)
 add_terra_test(test_mpi_smoke)
