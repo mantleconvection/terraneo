@@ -1,12 +1,12 @@
 
 #include <optional>
 
+#include "../src/terra/communication/shell/communication.hpp"
 #include "fe/wedge/integrands.hpp"
-#include "terra/communication/communication.hpp"
 #include "terra/dense/mat.hpp"
 #include "terra/grid/grid_types.hpp"
 #include "terra/grid/shell/spherical_shell.hpp"
-#include "terra/kernels/common/vector_operations.hpp"
+#include "terra/kernels/common/grid_operations.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
 #include "terra/vtk/vtk.hpp"
 
@@ -1292,6 +1292,666 @@ struct LaplaceOperatorWedge
     }
 };
 
+struct LaplaceOperatorWedgeOptimized
+{
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+
+    Grid4DDataScalar< double > src_;
+    Grid4DDataScalar< double > dst_;
+    bool                       treat_boundary_;
+    bool                       diagonal_;
+
+    constexpr static int num_wedges          = 2;
+    constexpr static int num_nodes_per_wedge = 6;
+
+#if 0
+    constexpr int    nq              = 2;
+    constexpr double one_over_sqrt_3 = 0.57735026918962576450914878050195745564760175127012687601860232648397767230;
+    constexpr dense::Vec< double, 3 > qp[nq] = {
+        { 1.0 / 3.0, 1.0 / 3.0, -one_over_sqrt_3 }, { 1.0 / 3.0, 1.0 / 3.0, one_over_sqrt_3 } };
+    constexpr double qw[nq] = { 1.0, 1.0 };
+#endif
+
+#if 1
+    constexpr static int                     nq     = 1;
+    constexpr static dense::Vec< double, 3 > qp[nq] = { { 1.0 / 3.0, 1.0 / 3.0, 0.0 } };
+    constexpr static double                  qw[nq] = { 1.0 };
+#endif
+
+#if 0
+
+    constexpr int                     nq     = 6;
+    constexpr dense::Vec< double, 3 > qp[nq] = {
+        { { 0.6666666666666666, 0.1666666666666667, -0.5773502691896257 } },
+        { { 0.1666666666666667, 0.6666666666666666, -0.5773502691896257 } },
+        { { 0.1666666666666667, 0.1666666666666667, -0.5773502691896257 } },
+        { { 0.6666666666666666, 0.1666666666666667, 0.5773502691896257 } },
+        { { 0.1666666666666667, 0.6666666666666666, 0.5773502691896257 } },
+        { { 0.1666666666666667, 0.1666666666666667, 0.5773502691896257 } } };
+    constexpr double qw[nq] = {
+        0.1666666666666667,
+        0.1666666666666667,
+        0.1666666666666667,
+        0.1666666666666667,
+        0.1666666666666667,
+        0.1666666666666667 };
+#endif
+
+    LaplaceOperatorWedgeOptimized(
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataScalar< double >& src,
+        const Grid4DDataScalar< double >& dst,
+        const bool                        treat_boundary,
+        const bool                        diagonal )
+    : grid_( grid )
+    , radii_( radii )
+    , src_( src )
+    , dst_( dst )
+    , treat_boundary_( treat_boundary )
+    , diagonal_( diagonal )
+    {}
+
+    KOKKOS_INLINE_FUNCTION void
+        operator()( Kokkos::TeamPolicy< Kokkos::DefaultExecutionSpace >::member_type team_member ) const
+    {
+        const int num_subdomains = static_cast< int >( src_.extent( 0 ) );
+        const int num_cells_x    = static_cast< int >( src_.extent( 1 ) - 1 );
+        const int num_cells_y    = static_cast< int >( src_.extent( 2 ) - 1 );
+        const int num_cells_r    = static_cast< int >( src_.extent( 3 ) - 1 );
+
+        // --- Recover Outer Loop Indices (subdomain, x, y) ---
+
+        // Get the unique ID for this team (0 to league_size-1)
+        const int league_rank = team_member.league_rank();
+
+        // Un-flatten the league_rank to get the 3D outer indices.
+        // This is the C-style (row-major) un-flattening logic.
+        // flat_index = sub*(N_x*N_y) + x*(N_y) + y
+#if 1
+        const int y_cell             = league_rank % num_cells_y;
+        const int temp_index         = league_rank / num_cells_y;
+        const int x_cell             = temp_index % num_cells_x;
+        const int local_subdomain_id = temp_index / num_cells_x;
+#else
+        const int local_subdomain_id = league_rank % num_subdomains;
+        const int temp_index         = league_rank / num_subdomains;
+        const int x_cell             = temp_index % num_cells_x;
+        const int y_cell             = temp_index / num_cells_x;
+#endif
+
+        // First all the r-independent stuff.
+        // Gather surface points for each wedge.
+        constexpr int num_wedges = 2;
+
+        // Extract vertex positions of quad
+        // (0, 0), (1, 0), (0, 1), (1, 1).
+        dense::Vec< double, 3 > quad_surface_coords[2][2];
+
+        for ( int x = x_cell; x <= x_cell + 1; x++ )
+        {
+            for ( int y = y_cell; y <= y_cell + 1; y++ )
+            {
+                for ( int d = 0; d < 3; d++ )
+                {
+                    quad_surface_coords[x - x_cell][y - y_cell]( d ) = grid_( local_subdomain_id, x, y, d );
+                }
+            }
+        }
+
+        // Sort coords for the two wedge surfaces.
+        dense::Vec< double, 3 > wedge_phy_surf[num_wedges][3] = {};
+
+        wedge_phy_surf[0][0] = quad_surface_coords[0][0];
+        wedge_phy_surf[0][1] = quad_surface_coords[1][0];
+        wedge_phy_surf[0][2] = quad_surface_coords[0][1];
+
+        wedge_phy_surf[1][0] = quad_surface_coords[1][1];
+        wedge_phy_surf[1][1] = quad_surface_coords[0][1];
+        wedge_phy_surf[1][2] = quad_surface_coords[1][0];
+
+        // Compute lateral part of Jacobian.
+        // For now, we only do this at a single quad point.
+
+        dense::Mat< double, 3, 3 > jac_lat_inv_t[num_wedges][nq] = {};
+        double                     det_jac_lat[num_wedges][nq]   = {};
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int q = 0; q < nq; q++ )
+            {
+                const auto jac_lat = fe::wedge::jac_lat(
+                    wedge_phy_surf[wedge][0],
+                    wedge_phy_surf[wedge][1],
+                    wedge_phy_surf[wedge][2],
+                    qp[q]( 0 ),
+                    qp[q]( 1 ) );
+
+                det_jac_lat[wedge][q] = Kokkos::abs( jac_lat.det() );
+
+                jac_lat_inv_t[wedge][q] = jac_lat.inv().transposed();
+            }
+        }
+
+        // Let's now gather all the shape functions and gradients we need.
+        double shape_lat[num_wedges][num_nodes_per_wedge][nq] = {};
+        double shape_rad[num_wedges][num_nodes_per_wedge][nq] = {};
+
+        double grad_shape_lat_xi[num_wedges][num_nodes_per_wedge]  = {};
+        double grad_shape_lat_eta[num_wedges][num_nodes_per_wedge] = {};
+        double grad_shape_rad[num_wedges][num_nodes_per_wedge]     = {};
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int node_idx = 0; node_idx < num_nodes_per_wedge; node_idx++ )
+            {
+                for ( int q = 0; q < nq; q++ )
+                {
+                    shape_lat[wedge][node_idx][q] = fe::wedge::shape_lat( qp[q]( 0 ), qp[q]( 1 ) )( node_idx % 3 );
+                    shape_rad[wedge][node_idx][q] = fe::wedge::shape_rad( qp[q]( 2 ) )( node_idx / 3 );
+                }
+
+                grad_shape_lat_xi[wedge][node_idx]  = fe::wedge::grad_shape_lat_xi()( node_idx % 3 );
+                grad_shape_lat_eta[wedge][node_idx] = fe::wedge::grad_shape_lat_eta()( node_idx % 3 );
+                grad_shape_rad[wedge][node_idx]     = fe::wedge::grad_shape_rad()( node_idx / 3 );
+            }
+        }
+
+        dense::Vec< double, 3 > g_rad[num_wedges][num_nodes_per_wedge][nq] = {};
+        dense::Vec< double, 3 > g_lat[num_wedges][num_nodes_per_wedge][nq] = {};
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int node_idx = 0; node_idx < num_nodes_per_wedge; node_idx++ )
+            {
+                for ( int q = 0; q < nq; q++ )
+                {
+                    g_rad[wedge][node_idx][q] = jac_lat_inv_t[wedge][q] *
+                                                dense::Vec< double, 3 >{
+                                                    grad_shape_lat_xi[wedge][node_idx] * shape_rad[wedge][node_idx][q],
+                                                    grad_shape_lat_eta[wedge][node_idx] * shape_rad[wedge][node_idx][q],
+                                                    0.0 };
+
+                    g_lat[wedge][node_idx][q] =
+                        jac_lat_inv_t[wedge][q] * dense::Vec< double, 3 >{ 0.0, 0.0, shape_lat[wedge][node_idx][q] };
+                }
+            }
+        }
+
+        // Only now we introduce radially dependent terms.
+
+        Kokkos::parallel_for( Kokkos::TeamThreadRange( team_member, num_cells_r ), [&]( const int& r_cell ) {
+            // Inside this lambda, we have all four indices!
+            // (local_subdomain_id, x_cell, y_cell, r_cell)
+
+            const double r_1 = radii_( local_subdomain_id, r_cell );
+            const double r_2 = radii_( local_subdomain_id, r_cell + 1 );
+
+            // For now, compute the local element matrix. We'll improve that later.
+            dense::Mat< double, 6, 6 > A[num_wedges] = {};
+
+            for ( int wedge = 0; wedge < num_wedges; wedge++ )
+            {
+                for ( int q = 0; q < nq; q++ )
+                {
+                    const double r = fe::wedge::forward_map_rad( r_1, r_2, qp[q]( 2 ) );
+                    // TODO: we can precompute that per quadrature point to avoid the division.
+                    const double r_inv = 1.0 / r;
+
+                    const double grad_r = fe::wedge::grad_forward_map_rad( r_1, r_2 );
+                    // TODO: we can precompute that per quadrature point to avoid the division.
+                    const double grad_r_inv = 1.0 / grad_r;
+
+                    for ( int i = 0; i < num_nodes_per_wedge; i++ )
+                    {
+                        for ( int j = 0; j < num_nodes_per_wedge; j++ )
+                        {
+                            const dense::Vec< double, 3 > grad_i =
+                                r_inv * g_rad[wedge][i][q] + grad_shape_rad[wedge][i] * grad_r_inv * g_lat[wedge][i][q];
+                            const dense::Vec< double, 3 > grad_j =
+                                r_inv * g_rad[wedge][j][q] + grad_shape_rad[wedge][j] * grad_r_inv * g_lat[wedge][j][q];
+
+                            A[wedge]( i, j ) +=
+                                qw[q] * ( grad_i.dot( grad_j ) * r * r * grad_r * det_jac_lat[wedge][q] );
+                        }
+                    }
+                }
+            }
+
+            if ( treat_boundary_ )
+            {
+                for ( int wedge = 0; wedge < num_wedges; wedge++ )
+                {
+                    dense::Mat< double, 6, 6 > boundary_mask;
+                    boundary_mask.fill( 1.0 );
+                    if ( r_cell == 0 )
+                    {
+                        // Inner boundary (CMB).
+                        for ( int i = 0; i < 6; i++ )
+                        {
+                            for ( int j = 0; j < 6; j++ )
+                            {
+                                if ( i != j && ( i < 3 || j < 3 ) )
+                                {
+                                    boundary_mask( i, j ) = 0.0;
+                                }
+                            }
+                        }
+                    }
+
+                    if ( r_cell + 1 == radii_.extent( 1 ) - 1 )
+                    {
+                        // Outer boundary (surface).
+                        for ( int i = 0; i < 6; i++ )
+                        {
+                            for ( int j = 0; j < 6; j++ )
+                            {
+                                if ( i != j && ( i >= 3 || j >= 3 ) )
+                                {
+                                    boundary_mask( i, j ) = 0.0;
+                                }
+                            }
+                        }
+                    }
+
+                    A[wedge].hadamard_product( boundary_mask );
+                }
+            }
+
+            if ( diagonal_ )
+            {
+                for ( int wedge = 0; wedge < num_wedges; wedge++ )
+                {
+                    for ( int i = 0; i < 6; i++ )
+                    {
+                        for ( int j = 0; j < 6; j++ )
+                        {
+                            if ( i != j )
+                            {
+                                A[wedge]( i, j ) = 0.0;
+                            }
+                        }
+                    }
+                }
+            }
+
+            dense::Vec< double, 6 > src[num_wedges];
+
+            src[0]( 0 ) = src_( local_subdomain_id, x_cell, y_cell, r_cell );
+            src[0]( 1 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell );
+            src[0]( 2 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell );
+            src[0]( 3 ) = src_( local_subdomain_id, x_cell, y_cell, r_cell + 1 );
+            src[0]( 4 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 );
+            src[0]( 5 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 );
+
+            src[1]( 0 ) = src_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell );
+            src[1]( 1 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell );
+            src[1]( 2 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell );
+            src[1]( 3 ) = src_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell + 1 );
+            src[1]( 4 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 );
+            src[1]( 5 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 );
+
+            dense::Vec< double, 6 > dst[num_wedges];
+
+            dst[0] = A[0] * src[0];
+            dst[1] = A[1] * src[1];
+
+            // std::cout << A[0] << std::endl;
+            // std::cout << A[1] << std::endl;
+
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell, r_cell ), dst[0]( 0 ) );
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell ), dst[0]( 1 ) );
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell ), dst[0]( 2 ) );
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell, r_cell + 1 ), dst[0]( 3 ) );
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 ), dst[0]( 4 ) );
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 ), dst[0]( 5 ) );
+
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell ), dst[1]( 0 ) );
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell ), dst[1]( 1 ) );
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell ), dst[1]( 2 ) );
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell + 1 ), dst[1]( 3 ) );
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 ), dst[1]( 4 ) );
+            Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 ), dst[1]( 5 ) );
+        } );
+    }
+};
+
+struct LaplaceOperatorWedgePrecomp
+{
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+
+    Grid4DDataScalar< double > src_;
+    Grid4DDataScalar< double > dst_;
+    bool                       treat_boundary_;
+    bool                       diagonal_;
+
+    constexpr static int num_wedges          = 2;
+    constexpr static int num_nodes_per_wedge = 6;
+
+#if 0
+    constexpr int    nq              = 2;
+    constexpr double one_over_sqrt_3 = 0.57735026918962576450914878050195745564760175127012687601860232648397767230;
+    constexpr dense::Vec< double, 3 > qp[nq] = {
+        { 1.0 / 3.0, 1.0 / 3.0, -one_over_sqrt_3 }, { 1.0 / 3.0, 1.0 / 3.0, one_over_sqrt_3 } };
+    constexpr double qw[nq] = { 1.0, 1.0 };
+#endif
+
+#if 1
+    constexpr static int                     nq     = 1;
+    constexpr static dense::Vec< double, 3 > qp[nq] = { { 1.0 / 3.0, 1.0 / 3.0, 0.0 } };
+    constexpr static double                  qw[nq] = { 1.0 };
+#endif
+
+#if 0
+
+    constexpr int                     nq     = 6;
+    constexpr dense::Vec< double, 3 > qp[nq] = {
+        { { 0.6666666666666666, 0.1666666666666667, -0.5773502691896257 } },
+        { { 0.1666666666666667, 0.6666666666666666, -0.5773502691896257 } },
+        { { 0.1666666666666667, 0.1666666666666667, -0.5773502691896257 } },
+        { { 0.6666666666666666, 0.1666666666666667, 0.5773502691896257 } },
+        { { 0.1666666666666667, 0.6666666666666666, 0.5773502691896257 } },
+        { { 0.1666666666666667, 0.1666666666666667, 0.5773502691896257 } } };
+    constexpr double qw[nq] = {
+        0.1666666666666667,
+        0.1666666666666667,
+        0.1666666666666667,
+        0.1666666666666667,
+        0.1666666666666667,
+        0.1666666666666667 };
+#endif
+
+    // [subdomain][x_cell][y_cell][wedge][node][q][component]
+    Kokkos::View< double*** [num_wedges][num_nodes_per_wedge][nq][3] > g_lat_;
+    Kokkos::View< double*** [num_wedges][num_nodes_per_wedge][nq][3] > g_rad_;
+    Kokkos::View< double*** [num_wedges][nq] >                         det_jac_lat_;
+
+    LaplaceOperatorWedgePrecomp(
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataScalar< double >& src,
+        const Grid4DDataScalar< double >& dst,
+        const bool                        treat_boundary,
+        const bool                        diagonal )
+    : grid_( grid )
+    , radii_( radii )
+    , src_( src )
+    , dst_( dst )
+    , treat_boundary_( treat_boundary )
+    , diagonal_( diagonal )
+    {
+        g_lat_ = Kokkos::View< double*** [num_wedges][num_nodes_per_wedge][nq][3] >(
+            "g_lat", src.extent( 0 ), src.extent( 1 ), src.extent( 2 ) );
+        g_rad_ = Kokkos::View< double*** [num_wedges][num_nodes_per_wedge][nq][3] >(
+            "g_rad", src.extent( 0 ), src.extent( 1 ), src.extent( 2 ) );
+        det_jac_lat_ = Kokkos::View< double*** [num_wedges][nq] >(
+            "det_jac_lat", src.extent( 0 ), src.extent( 1 ), src.extent( 2 ) );
+    }
+
+    KOKKOS_INLINE_FUNCTION void operator()( const int local_subdomain_id, const int x_cell, const int y_cell ) const
+    {
+        // Extract vertex positions of quad
+        // (0, 0), (1, 0), (0, 1), (1, 1).
+        dense::Vec< double, 3 > quad_surface_coords[2][2];
+
+        for ( int x = x_cell; x <= x_cell + 1; x++ )
+        {
+            for ( int y = y_cell; y <= y_cell + 1; y++ )
+            {
+                for ( int d = 0; d < 3; d++ )
+                {
+                    quad_surface_coords[x - x_cell][y - y_cell]( d ) = grid_( local_subdomain_id, x, y, d );
+                }
+            }
+        }
+
+        // Sort coords for the two wedge surfaces.
+        dense::Vec< double, 3 > wedge_phy_surf[num_wedges][3] = {};
+
+        wedge_phy_surf[0][0] = quad_surface_coords[0][0];
+        wedge_phy_surf[0][1] = quad_surface_coords[1][0];
+        wedge_phy_surf[0][2] = quad_surface_coords[0][1];
+
+        wedge_phy_surf[1][0] = quad_surface_coords[1][1];
+        wedge_phy_surf[1][1] = quad_surface_coords[0][1];
+        wedge_phy_surf[1][2] = quad_surface_coords[1][0];
+
+        // Compute lateral part of Jacobian.
+        // For now, we only do this at a single quad point.
+
+        dense::Mat< double, 3, 3 > jac_lat_inv_t[num_wedges][nq] = {};
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int q = 0; q < nq; q++ )
+            {
+                const auto jac_lat = fe::wedge::jac_lat(
+                    wedge_phy_surf[wedge][0],
+                    wedge_phy_surf[wedge][1],
+                    wedge_phy_surf[wedge][2],
+                    qp[q]( 0 ),
+                    qp[q]( 1 ) );
+
+                det_jac_lat_( local_subdomain_id, x_cell, y_cell, wedge, q ) = Kokkos::abs( jac_lat.det() );
+
+                jac_lat_inv_t[wedge][q] = jac_lat.inv().transposed();
+            }
+        }
+
+        // Let's now gather all the shape functions and gradients we need.
+        double shape_lat[num_wedges][num_nodes_per_wedge][nq] = {};
+        double shape_rad[num_wedges][num_nodes_per_wedge][nq] = {};
+
+        double grad_shape_lat_xi[num_wedges][num_nodes_per_wedge]  = {};
+        double grad_shape_lat_eta[num_wedges][num_nodes_per_wedge] = {};
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int node_idx = 0; node_idx < num_nodes_per_wedge; node_idx++ )
+            {
+                for ( int q = 0; q < nq; q++ )
+                {
+                    shape_lat[wedge][node_idx][q] = fe::wedge::shape_lat( qp[q]( 0 ), qp[q]( 1 ) )( node_idx % 3 );
+                    shape_rad[wedge][node_idx][q] = fe::wedge::shape_rad( qp[q]( 2 ) )( node_idx / 3 );
+                }
+
+                grad_shape_lat_xi[wedge][node_idx]  = fe::wedge::grad_shape_lat_xi()( node_idx % 3 );
+                grad_shape_lat_eta[wedge][node_idx] = fe::wedge::grad_shape_lat_eta()( node_idx % 3 );
+            }
+        }
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int node_idx = 0; node_idx < num_nodes_per_wedge; node_idx++ )
+            {
+                for ( int q = 0; q < nq; q++ )
+                {
+                    const dense::Vec< double, 3 > g_rad_local =
+                        jac_lat_inv_t[wedge][q] *
+                        dense::Vec< double, 3 >{
+                            grad_shape_lat_xi[wedge][node_idx] * shape_rad[wedge][node_idx][q],
+                            grad_shape_lat_eta[wedge][node_idx] * shape_rad[wedge][node_idx][q],
+                            0.0 };
+                    g_rad_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 0 ) = g_rad_local( 0 );
+                    g_rad_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 1 ) = g_rad_local( 1 );
+                    g_rad_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 2 ) = g_rad_local( 2 );
+
+                    const dense::Vec< double, 3 > g_lat_local =
+                        jac_lat_inv_t[wedge][q] * dense::Vec< double, 3 >{ 0.0, 0.0, shape_lat[wedge][node_idx][q] };
+                    g_lat_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 0 ) = g_lat_local( 0 );
+                    g_lat_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 1 ) = g_lat_local( 1 );
+                    g_lat_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 2 ) = g_lat_local( 2 );
+                }
+            }
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION void
+        operator()( const int local_subdomain_id, const int x_cell, const int y_cell, const int r_cell ) const
+    {
+        // Only now we introduce radially dependent terms.
+
+        // Inside this lambda, we have all four indices!
+        // (local_subdomain_id, x_cell, y_cell, r_cell)
+
+        const double r_1 = radii_( local_subdomain_id, r_cell );
+        const double r_2 = radii_( local_subdomain_id, r_cell + 1 );
+
+        // For now, compute the local element matrix. We'll improve that later.
+        dense::Mat< double, 6, 6 > A[num_wedges] = {};
+
+        dense::Vec< double, 3 > g_rad[num_wedges][num_nodes_per_wedge][nq];
+        dense::Vec< double, 3 > g_lat[num_wedges][num_nodes_per_wedge][nq];
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int node_idx = 0; node_idx < num_nodes_per_wedge; node_idx++ )
+            {
+                for ( int q = 0; q < nq; q++ )
+                {
+                    g_rad[wedge][node_idx][q] = {
+                        g_rad_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 0 ),
+                        g_rad_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 1 ),
+                        g_rad_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 2 ) };
+
+                    g_lat[wedge][node_idx][q] = {
+                        g_lat_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 0 ),
+                        g_lat_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 1 ),
+                        g_lat_( local_subdomain_id, x_cell, y_cell, wedge, node_idx, q, 2 ) };
+                }
+            }
+        }
+
+        for ( int wedge = 0; wedge < num_wedges; wedge++ )
+        {
+            for ( int q = 0; q < nq; q++ )
+            {
+                const double r = fe::wedge::forward_map_rad( r_1, r_2, qp[q]( 2 ) );
+                // TODO: we can precompute that per quadrature point to avoid the division.
+                const double r_inv = 1.0 / r;
+
+                const double grad_r = fe::wedge::grad_forward_map_rad( r_1, r_2 );
+                // TODO: we can precompute that per quadrature point to avoid the division.
+                const double grad_r_inv = 1.0 / grad_r;
+
+                for ( int i = 0; i < num_nodes_per_wedge; i++ )
+                {
+                    for ( int j = 0; j < num_nodes_per_wedge; j++ )
+                    {
+                        const double grad_shape_rad_i = fe::wedge::grad_shape_rad()( i / 3 );
+                        const double grad_shape_rad_j = fe::wedge::grad_shape_rad()( j / 3 );
+
+                        const dense::Vec< double, 3 > grad_i =
+                            r_inv * g_rad[wedge][i][q] + grad_shape_rad_i * grad_r_inv * g_lat[wedge][i][q];
+                        const dense::Vec< double, 3 > grad_j =
+                            r_inv * g_rad[wedge][j][q] + grad_shape_rad_j * grad_r_inv * g_lat[wedge][j][q];
+
+                        A[wedge]( i, j ) += qw[q] * ( grad_i.dot( grad_j ) * r * r * grad_r *
+                                                      det_jac_lat_( local_subdomain_id, x_cell, y_cell, wedge, q ) );
+                    }
+                }
+            }
+        }
+
+        if ( treat_boundary_ )
+        {
+            for ( int wedge = 0; wedge < num_wedges; wedge++ )
+            {
+                dense::Mat< double, 6, 6 > boundary_mask;
+                boundary_mask.fill( 1.0 );
+                if ( r_cell == 0 )
+                {
+                    // Inner boundary (CMB).
+                    for ( int i = 0; i < 6; i++ )
+                    {
+                        for ( int j = 0; j < 6; j++ )
+                        {
+                            if ( i != j && ( i < 3 || j < 3 ) )
+                            {
+                                boundary_mask( i, j ) = 0.0;
+                            }
+                        }
+                    }
+                }
+
+                if ( r_cell + 1 == radii_.extent( 1 ) - 1 )
+                {
+                    // Outer boundary (surface).
+                    for ( int i = 0; i < 6; i++ )
+                    {
+                        for ( int j = 0; j < 6; j++ )
+                        {
+                            if ( i != j && ( i >= 3 || j >= 3 ) )
+                            {
+                                boundary_mask( i, j ) = 0.0;
+                            }
+                        }
+                    }
+                }
+
+                A[wedge].hadamard_product( boundary_mask );
+            }
+        }
+
+        if ( diagonal_ )
+        {
+            for ( int wedge = 0; wedge < num_wedges; wedge++ )
+            {
+                for ( int i = 0; i < 6; i++ )
+                {
+                    for ( int j = 0; j < 6; j++ )
+                    {
+                        if ( i != j )
+                        {
+                            A[wedge]( i, j ) = 0.0;
+                        }
+                    }
+                }
+            }
+        }
+
+        dense::Vec< double, 6 > src[num_wedges];
+
+        src[0]( 0 ) = src_( local_subdomain_id, x_cell, y_cell, r_cell );
+        src[0]( 1 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell );
+        src[0]( 2 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell );
+        src[0]( 3 ) = src_( local_subdomain_id, x_cell, y_cell, r_cell + 1 );
+        src[0]( 4 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 );
+        src[0]( 5 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 );
+
+        src[1]( 0 ) = src_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell );
+        src[1]( 1 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell );
+        src[1]( 2 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell );
+        src[1]( 3 ) = src_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell + 1 );
+        src[1]( 4 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 );
+        src[1]( 5 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 );
+
+        dense::Vec< double, 6 > dst[num_wedges];
+
+        dst[0] = A[0] * src[0];
+        dst[1] = A[1] * src[1];
+
+        // std::cout << A[0] << std::endl;
+        // std::cout << A[1] << std::endl;
+
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell, r_cell ), dst[0]( 0 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell ), dst[0]( 1 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell ), dst[0]( 2 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell, r_cell + 1 ), dst[0]( 3 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 ), dst[0]( 4 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 ), dst[0]( 5 ) );
+
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell ), dst[1]( 0 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell ), dst[1]( 1 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell ), dst[1]( 2 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell + 1 ), dst[1]( 3 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 ), dst[1]( 4 ) );
+        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 ), dst[1]( 5 ) );
+    }
+};
+
 // x = x + wI * ( b - Ax )
 void richardson_step(
     const DistributedDomain&          domain,
@@ -1310,7 +1970,7 @@ void richardson_step(
         grid::shell::local_domain_md_range_policy_cells( domain ),
         LaplaceOperator( grid, radii, x, tmp, true, false ) );
 
-    kernels::common::lincomb( x, 1.0, x, omega, b, -omega, tmp );
+    kernels::common::lincomb( x, 0.0, 1.0, x, omega, b, -omega, tmp );
 }
 
 void single_apply()
@@ -1320,8 +1980,8 @@ void single_apply()
     const auto src = grid::shell::allocate_scalar_grid< double >( "src", domain );
     const auto dst = grid::shell::allocate_scalar_grid< double >( "dst", domain );
 
-    communication::shell::SubdomainNeighborhoodSendBuffer send_buffers( domain );
-    communication::shell::SubdomainNeighborhoodRecvBuffer recv_buffers( domain );
+    communication::shell::SubdomainNeighborhoodSendBuffer< double > send_buffers( domain );
+    communication::shell::SubdomainNeighborhoodRecvBuffer< double > recv_buffers( domain );
 
     std::vector< std::array< int, 11 > > expected_recvs_metadata;
     std::vector< MPI_Request >           expected_recvs_requests;
@@ -1361,6 +2021,47 @@ void single_apply()
 }
 
 #if 1
+
+void apply_laplacian(
+    const auto& domain,
+    const auto& subdomain_shell_coords,
+    const auto& subdomain_radii,
+    const auto& src,
+    const auto& dst,
+    const bool  treat_boundary,
+    const bool  diagonal )
+{
+#if 0
+    Kokkos::parallel_for(
+        "matvec",
+        grid::shell::local_domain_md_range_policy_cells( domain ),
+        LaplaceOperatorWedge( subdomain_shell_coords, subdomain_radii, src, dst, treat_boundary, diagonal ) );
+#else
+
+    // The league size is the total number of work items for the outer loops
+    const int num_subdomains = src.extent( 0 );
+    const int num_cells_x    = src.extent( 1 ) - 1;
+    const int num_cells_y    = src.extent( 2 ) - 1;
+    const int num_cells_r    = src.extent( 3 ) - 1;
+
+    const int league_size = num_subdomains * num_cells_x * num_cells_y;
+
+    // The number of threads in each team. This should be large enough
+    // to cover the inner loop dimension N_r.
+    // const int team_size = num_cells_r; // Or Kokkos::AUTO
+    const auto team_size = Kokkos::AUTO;
+
+    // Create the policy
+    using team_policy_t = Kokkos::TeamPolicy<>;
+    team_policy_t policy( league_size, team_size );
+
+    Kokkos::parallel_for(
+        "matvec",
+        policy,
+        LaplaceOperatorWedgeOptimized( subdomain_shell_coords, subdomain_radii, src, dst, treat_boundary, diagonal ) );
+
+#endif
+}
 
 void all_diamonds()
 {
@@ -1403,14 +2104,29 @@ void all_diamonds()
     const int num_dofs = u.span();
     std::cout << "Num DoFs: " << num_dofs << std::endl;
 
-    communication::shell::SubdomainNeighborhoodSendBuffer send_buffers( domain );
-    communication::shell::SubdomainNeighborhoodRecvBuffer recv_buffers( domain );
+    communication::shell::SubdomainNeighborhoodSendBuffer< double > send_buffers( domain );
+    communication::shell::SubdomainNeighborhoodRecvBuffer< double > recv_buffers( domain );
 
     std::vector< std::array< int, 11 > > expected_recvs_metadata;
     std::vector< MPI_Request >           expected_recvs_requests;
 
     const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
     const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
+
+    LaplaceOperator lapl( subdomain_shell_coords, subdomain_radii, tmp, tmp, false, true );
+
+    if constexpr ( std::is_same_v< LaplaceOperator, LaplaceOperatorWedgePrecomp > )
+    {
+        // Precompute
+        Kokkos::parallel_for(
+            "matvec",
+            Kokkos::MDRangePolicy< Kokkos::Rank< 3 > >(
+                { 0, 0, 0 },
+                { static_cast< long long >( domain.subdomains().size() ),
+                  domain.domain_info().subdomain_num_nodes_per_side_laterally() - 1,
+                  domain.domain_info().subdomain_num_nodes_per_side_laterally() - 1 } ),
+            lapl );
+    }
 
     // Set up solution data.
     Kokkos::parallel_for(
@@ -1424,20 +2140,22 @@ void all_diamonds()
         local_domain_md_range_policy_nodes( domain ),
         SolutionInterpolator( subdomain_shell_coords, subdomain_radii, g, true ) );
 
-    Kokkos::parallel_for(
-        "matvec",
-        grid::shell::local_domain_md_range_policy_cells( domain ),
-        LaplaceOperator( subdomain_shell_coords, subdomain_radii, g, Adiagg, false, true ) );
+    lapl.src_            = g;
+    lapl.dst_            = Adiagg;
+    lapl.treat_boundary_ = false;
+    lapl.diagonal_       = true;
+    Kokkos::parallel_for( "matvec", grid::shell::local_domain_md_range_policy_cells( domain ), lapl );
 
     communication::shell::pack_and_send_local_subdomain_boundaries(
         domain, Adiagg, send_buffers, expected_recvs_requests, expected_recvs_metadata );
     communication::shell::recv_unpack_and_add_local_subdomain_boundaries(
         domain, Adiagg, recv_buffers, expected_recvs_requests, expected_recvs_metadata );
 
-    Kokkos::parallel_for(
-        "matvec",
-        grid::shell::local_domain_md_range_policy_cells( domain ),
-        LaplaceOperator( subdomain_shell_coords, subdomain_radii, g, b, false, false ) );
+    lapl.src_            = g;
+    lapl.dst_            = b;
+    lapl.treat_boundary_ = false;
+    lapl.diagonal_       = false;
+    Kokkos::parallel_for( "matvec", grid::shell::local_domain_md_range_policy_cells( domain ), lapl );
 
     communication::shell::pack_and_send_local_subdomain_boundaries(
         domain, b, send_buffers, expected_recvs_requests, expected_recvs_metadata );
@@ -1458,33 +2176,34 @@ void all_diamonds()
     double duration_matvec_sum = 0;
     double duration_iter_sum   = 0;
 
-    const int iterations = 10000;
+    const int iterations = 10;
 
     for ( int iter = 0; iter < iterations; iter++ )
     {
-        if ( iter % 100 == 0 )
+        if ( iter % 1 == 0 )
         {
             std::cout << "iter = " << iter;
             const bool comp_norm = true;
             if ( comp_norm )
             {
-                kernels::common::lincomb( error, 1.0, u, -1.0, solution );
+                kernels::common::lincomb( error, 0.0, 1.0, u, -1.0, solution );
                 const auto error_inf_norm = kernels::common::max_magnitude( error );
                 std::cout << ", error inf norm: " << error_inf_norm;
 
                 kernels::common::set_constant( tmp, 0.0 );
 
-                Kokkos::parallel_for(
-                    "matvec",
-                    grid::shell::local_domain_md_range_policy_cells( domain ),
-                    LaplaceOperator( subdomain_shell_coords, subdomain_radii, u, tmp, true, false ) );
+                lapl.src_            = u;
+                lapl.dst_            = tmp;
+                lapl.treat_boundary_ = true;
+                lapl.diagonal_       = false;
+                Kokkos::parallel_for( "matvec", grid::shell::local_domain_md_range_policy_cells( domain ), lapl );
 
-                communication::pack_and_send_local_subdomain_boundaries(
+                communication::shell::pack_and_send_local_subdomain_boundaries(
                     domain, tmp, send_buffers, expected_recvs_requests, expected_recvs_metadata );
-                communication::recv_unpack_and_add_local_subdomain_boundaries(
+                communication::shell::recv_unpack_and_add_local_subdomain_boundaries(
                     domain, tmp, recv_buffers, expected_recvs_requests, expected_recvs_metadata );
 
-                kernels::common::lincomb( r, 1.0, b, -1.0, tmp );
+                kernels::common::lincomb( r, 0.0, 1.0, b, -1.0, tmp );
 
                 const auto residual_inf_norm = kernels::common::max_magnitude( r );
                 std::cout << ", residual inf norm: " << residual_inf_norm;
@@ -1500,11 +2219,12 @@ void all_diamonds()
         kernels::common::set_constant( tmp, 0.0 );
 
         Kokkos::Timer timer_matvec;
+        lapl.src_            = u;
+        lapl.dst_            = tmp;
+        lapl.treat_boundary_ = true;
+        lapl.diagonal_       = false;
         timer_matvec.reset();
-        Kokkos::parallel_for(
-            "matvec",
-            grid::shell::local_domain_md_range_policy_cells( domain ),
-            LaplaceOperator( subdomain_shell_coords, subdomain_radii, u, tmp, true, false ) );
+        Kokkos::parallel_for( "matvec", grid::shell::local_domain_md_range_policy_cells( domain ), lapl );
         Kokkos::fence();
         duration_matvec_sum += timer_matvec.seconds();
 
@@ -1513,20 +2233,22 @@ void all_diamonds()
         communication::shell::recv_unpack_and_add_local_subdomain_boundaries(
             domain, tmp, recv_buffers, expected_recvs_requests, expected_recvs_metadata );
 
-        kernels::common::lincomb( u, 1.0, u, omega, b, -omega, tmp );
+        kernels::common::lincomb( u, 0.0, 1.0, u, omega, b, -omega, tmp );
 
         Kokkos::fence();
         duration_iter_sum += timer.seconds();
     }
 
-    const double avg_iteration_duration   = duration_iter_sum / iterations;
-    const double avg_matvec_duration      = duration_matvec_sum / iterations;
-    const double dofs_per_second_per_iter = num_dofs / avg_iteration_duration;
+    const double avg_iteration_duration     = duration_iter_sum / iterations;
+    const double avg_matvec_duration        = duration_matvec_sum / iterations;
+    const double dofs_per_second_per_iter   = num_dofs / avg_iteration_duration;
+    const double dofs_per_second_per_matvec = num_dofs / avg_matvec_duration;
     std::cout << "Average iteration duration: " << avg_iteration_duration << " seconds" << std::endl;
     std::cout << "Average matvec duration:    " << avg_matvec_duration << " seconds" << std::endl;
     std::cout << "Dofs per second per iteration: " << dofs_per_second_per_iter << std::endl;
+    std::cout << "Dofs per second per matvec:    " << dofs_per_second_per_matvec << std::endl;
 
-    kernels::common::lincomb( error, 1.0, u, -1.0, solution );
+    kernels::common::lincomb( error, 0.0, 1.0, u, -1.0, solution );
 
     terra::vtk::VTKOutput vtk_after( subdomain_shell_coords, subdomain_radii, "laplace.vtu", false );
     vtk_after.add_scalar_field( g.label(), g );

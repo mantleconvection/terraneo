@@ -10,10 +10,10 @@ struct Vec
     T data[N] = {};
 
     KOKKOS_INLINE_FUNCTION
-    T& operator()( int i ) { return data[i]; }
+    constexpr T& operator()( int i ) { return data[i]; }
 
     KOKKOS_INLINE_FUNCTION
-    const T& operator()( int i ) const { return data[i]; }
+    constexpr const T& operator()( int i ) const { return data[i]; }
 
     void fill( const T value )
     {
@@ -33,7 +33,7 @@ struct Vec
     }
 
     KOKKOS_INLINE_FUNCTION
-    Vec operator+( const Vec& rhs ) const
+    constexpr Vec operator+( const Vec& rhs ) const
     {
         Vec out;
         for ( int i = 0; i < N; ++i )
@@ -42,7 +42,7 @@ struct Vec
     }
 
     KOKKOS_INLINE_FUNCTION
-    Vec operator-( const Vec& rhs ) const
+    constexpr Vec operator-( const Vec& rhs ) const
     {
         Vec out;
         for ( int i = 0; i < N; ++i )

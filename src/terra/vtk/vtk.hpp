@@ -886,7 +886,6 @@ class VTKOutput
         vtk_file << "</VTKFile>\n";
 
         vtk_file.close();
-        std::cout << "VTK file written to: " << output_path_ << std::endl;
     }
 
   private:

@@ -1,5 +1,5 @@
 
-#include <kernels/common/vector_operations.hpp>
+#include <kernels/common/grid_operations.hpp>
 
 #include "terra/dense/mat.hpp"
 #include "terra/dense/vec.hpp"
@@ -141,11 +141,11 @@ BenchmarkData
     {
         if ( benchmark == BenchmarkType::LINCOMB_1 )
         {
-            lincomb( y, 42.0, x0 );
+            lincomb( y, 0.0, 42.0, x0 );
         }
         else if ( benchmark == BenchmarkType::LINCOMB_2 )
         {
-            lincomb( y, 42.0, x0, 4711.0, x1 );
+            lincomb( y, 0.0, 42.0, x0, 4711.0, x1 );
         }
         else if ( benchmark == BenchmarkType::STENCIL_INNER_CONSTANT_7 )
         {

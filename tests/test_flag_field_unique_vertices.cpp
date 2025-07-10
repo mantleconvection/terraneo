@@ -2,7 +2,7 @@
 #include <iomanip>
 
 #include "../src/terra/communication/shell/communication.hpp"
-#include "kernels/common/vector_operations.hpp"
+#include "kernels/common/grid_operations.hpp"
 #include "terra/grid/shell/spherical_shell.hpp"
 #include "terra/vtk/vtk.hpp"
 
@@ -22,8 +22,8 @@ int main( int argc, char** argv )
     const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
     const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
 
-    terra::communication::shell::SubdomainNeighborhoodSendBuffer send_buffers( domain );
-    terra::communication::shell::SubdomainNeighborhoodRecvBuffer recv_buffers( domain );
+    terra::communication::shell::SubdomainNeighborhoodSendBuffer< double > send_buffers( domain );
+    terra::communication::shell::SubdomainNeighborhoodRecvBuffer< double > recv_buffers( domain );
 
     std::vector< std::array< int, 11 > > expected_recvs_metadata;
     std::vector< MPI_Request >           expected_recvs_requests;
@@ -116,7 +116,7 @@ int main( int argc, char** argv )
     std::cout << "max_mag = " << max_mag << std::endl;
     std::cout << "sum_mag = " << sum_mag << std::endl;
 
-    terra::kernels::common::lincomb( error, 1.0, u, -1.0, ones );
+    terra::kernels::common::lincomb( error, 0.0, 1.0, u, -1.0, ones );
 
     min_mag = terra::kernels::common::min_magnitude( error );
     max_mag = terra::kernels::common::max_magnitude( error );

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../kokkos/kokkos_wrapper.hpp"
-#include "terra/grid/grid_types.hpp"
+#include "grid/grid_types.hpp"
 
 namespace terra::kernels::common {
 
@@ -35,6 +35,7 @@ void scale( const grid::Grid4DDataScalar< ScalarType >& x, ScalarType value )
 template < typename ScalarType >
 void lincomb(
     const grid::Grid4DDataScalar< ScalarType >& y,
+    ScalarType                                  c_0,
     ScalarType                                  c_1,
     const grid::Grid4DDataScalar< ScalarType >& x_1 )
 {
@@ -42,13 +43,14 @@ void lincomb(
         "lincomb 1 arg (Grid4DDataScalar)",
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { y.extent( 0 ), y.extent( 1 ), y.extent( 2 ), y.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
-            y( local_subdomain, i, j, k ) = c_1 * x_1( local_subdomain, i, j, k );
+            y( local_subdomain, i, j, k ) = c_0 + c_1 * x_1( local_subdomain, i, j, k );
         } );
 }
 
 template < typename ScalarType >
 void lincomb(
     const grid::Grid4DDataScalar< ScalarType >& y,
+    ScalarType                                  c_0,
     ScalarType                                  c_1,
     const grid::Grid4DDataScalar< ScalarType >& x_1,
     ScalarType                                  c_2,
@@ -59,13 +61,14 @@ void lincomb(
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { y.extent( 0 ), y.extent( 1 ), y.extent( 2 ), y.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
             y( local_subdomain, i, j, k ) =
-                c_1 * x_1( local_subdomain, i, j, k ) + c_2 * x_2( local_subdomain, i, j, k );
+                c_0 + c_1 * x_1( local_subdomain, i, j, k ) + c_2 * x_2( local_subdomain, i, j, k );
         } );
 }
 
 template < typename ScalarType >
 void lincomb(
     const grid::Grid4DDataScalar< ScalarType >& y,
+    ScalarType                                  c_0,
     ScalarType                                  c_1,
     const grid::Grid4DDataScalar< ScalarType >& x_1,
     ScalarType                                  c_2,
@@ -77,7 +80,7 @@ void lincomb(
         "lincomb 3 args (Grid3DDataScalar)",
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { y.extent( 0 ), y.extent( 1 ), y.extent( 2 ), y.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
-            y( local_subdomain, i, j, k ) = c_1 * x_1( local_subdomain, i, j, k ) +
+            y( local_subdomain, i, j, k ) = c_0 + c_1 * x_1( local_subdomain, i, j, k ) +
                                             c_2 * x_2( local_subdomain, i, j, k ) +
                                             c_3 * x_3( local_subdomain, i, j, k );
         } );
@@ -150,6 +153,71 @@ ScalarType sum_of_absolutes( const grid::Grid4DDataScalar< ScalarType >& x )
         },
         Kokkos::Sum< ScalarType >( sum_abs ) );
     return sum_abs;
+}
+
+template < typename ScalarType >
+ScalarType dot_product( const grid::Grid4DDataScalar< ScalarType >& x, const grid::Grid4DDataScalar< ScalarType >& y )
+{
+    ScalarType dot_prod = 0.0;
+
+    Kokkos::parallel_reduce(
+        "dot_product",
+        Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, ScalarType& local_dot_prod ) {
+            ScalarType val = x( local_subdomain, i, j, k ) * y( local_subdomain, i, j, k );
+            local_dot_prod = local_dot_prod + val;
+        },
+        Kokkos::Sum< ScalarType >( dot_prod ) );
+
+    return dot_prod;
+}
+
+template < typename ScalarType, typename MaskType >
+ScalarType masked_dot_product(
+    const grid::Grid4DDataScalar< ScalarType >& x,
+    const grid::Grid4DDataScalar< ScalarType >& y,
+    const grid::Grid4DDataScalar< MaskType >&   mask )
+{
+    ScalarType dot_prod = 0.0;
+
+    Kokkos::parallel_reduce(
+        "masked_dot_product",
+        Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, ScalarType& local_dot_prod ) {
+            ScalarType val = x( local_subdomain, i, j, k ) * y( local_subdomain, i, j, k ) *
+                             static_cast< ScalarType >( mask( local_subdomain, i, j, k ) );
+            local_dot_prod = local_dot_prod + val;
+        },
+        Kokkos::Sum< ScalarType >( dot_prod ) );
+
+    return dot_prod;
+}
+
+template < typename ScalarType >
+bool has_nan( const grid::Grid4DDataScalar< ScalarType >& x )
+{
+    bool has_nan = false;
+
+    Kokkos::parallel_reduce(
+        "masked_dot_product",
+        Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, bool& local_has_nan ) {
+            local_has_nan = local_has_nan || Kokkos::isnan( x( local_subdomain, i, j, k ) );
+        },
+        Kokkos::LOr< bool >( has_nan ) );
+
+    return has_nan;
+}
+
+template < typename ScalarTypeDst, typename ScalarTypeSrc >
+void cast( const grid::Grid4DDataScalar< ScalarTypeDst >& dst, const grid::Grid4DDataScalar< ScalarTypeSrc >& src )
+{
+    Kokkos::parallel_for(
+        "cast",
+        Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { dst.extent( 0 ), dst.extent( 1 ), dst.extent( 2 ), dst.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
+            dst( local_subdomain, i, j, k ) = static_cast< ScalarTypeDst >( src( local_subdomain, i, j, k ) );
+        } );
 }
 
 } // namespace terra::kernels::common

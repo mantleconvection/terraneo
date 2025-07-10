@@ -48,7 +48,7 @@ int main( int argc, char** argv )
     const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
     const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
 
-    auto data = terra::grid::shell::allocate_scalar_grid( "scalar_data", domain );
+    auto data = terra::grid::shell::allocate_scalar_grid< double >( "scalar_data", domain );
 
     Kokkos::parallel_for(
         "some_interpolation",
