@@ -11,6 +11,7 @@
 #include "terra/kernels/common/grid_operations.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
 #include "terra/vtk/vtk.hpp"
+#include "util/table.hpp"
 
 using namespace terra;
 
@@ -76,7 +77,7 @@ struct SetOnBoundary
     }
 };
 
-double test( int level )
+double test( int level, util::Table& table )
 {
     /**
 
@@ -101,6 +102,8 @@ double test( int level )
 
     **/
 
+    Kokkos::Timer timer;
+
     using ScalarType = double;
 
     const auto domain = DistributedDomain::create_uniform_single_subdomain( level, level, 0.5, 1.0 );
@@ -114,14 +117,14 @@ double test( int level )
     auto b        = linalg::allocate_vector_q1_scalar< ScalarType >( "b", domain, level );
     auto r        = linalg::allocate_vector_q1_scalar< ScalarType >( "r", domain, level );
 
-    auto mask_data        = grid::shell::allocate_scalar_grid< unsigned char >( "mask_data", domain );
-    auto mask_data_double = grid::shell::allocate_scalar_grid< double >( "mask_data_double", domain );
+    auto mask_data      = grid::shell::allocate_scalar_grid< unsigned char >( "mask_data", domain );
+    auto mask_data_long = grid::shell::allocate_scalar_grid< long >( "mask_data_double", domain );
 
     linalg::setup_mask_data( domain, mask_data );
 
-    kernels::common::cast( mask_data_double, mask_data );
+    kernels::common::cast( mask_data_long, mask_data );
 
-    const auto num_dofs = kernels::common::dot_product( mask_data_double, mask_data_double );
+    const auto num_dofs = kernels::common::dot_product( mask_data_long, mask_data_long );
 
     u.add_mask_data( mask_data, level );
     g.add_mask_data( mask_data, level );
@@ -165,23 +168,33 @@ double test( int level )
         SetOnBoundary(
             Adiagg.grid_data( level ), b.grid_data( level ), domain.domain_info().subdomain_num_nodes_radially() ) );
 
-    linalg::solvers::IterativeSolverParameters solver_params{ 10000, 1e-16, 1e-16 };
+    linalg::solvers::IterativeSolverParameters solver_params{ 100, 1e-12, 1e-12 };
 
     linalg::solvers::PCG< Laplace > pcg( solver_params, tmp, Adiagg, error, r );
 
+    Kokkos::fence();
+    timer.reset();
     linalg::solvers::solve( pcg, A, u, b, level );
+    Kokkos::fence();
+    const auto time_solver = timer.seconds();
 
     linalg::lincomb( error, { 1.0, -1.0 }, { u, solution }, level );
     const auto l2_error = std::sqrt( dot( error, error, level ) / num_dofs );
 
-    vtk::VTKOutput vtk_after(
-        subdomain_shell_coords, subdomain_radii, "laplace_cg_level" + std::to_string( level ) + ".vtu", false );
-    vtk_after.add_scalar_field( g.grid_data( level ).label(), g.grid_data( level ) );
-    vtk_after.add_scalar_field( u.grid_data( level ).label(), u.grid_data( level ) );
-    vtk_after.add_scalar_field( solution.grid_data( level ).label(), solution.grid_data( level ) );
-    vtk_after.add_scalar_field( error.grid_data( level ).label(), error.grid_data( level ) );
+    if ( false )
+    {
+        vtk::VTKOutput vtk_after(
+            subdomain_shell_coords, subdomain_radii, "laplace_cg_level" + std::to_string( level ) + ".vtu", false );
+        vtk_after.add_scalar_field( g.grid_data( level ).label(), g.grid_data( level ) );
+        vtk_after.add_scalar_field( u.grid_data( level ).label(), u.grid_data( level ) );
+        vtk_after.add_scalar_field( solution.grid_data( level ).label(), solution.grid_data( level ) );
+        vtk_after.add_scalar_field( error.grid_data( level ).label(), error.grid_data( level ) );
 
-    vtk_after.write();
+        vtk_after.write();
+    }
+
+    table.add_row(
+        { { "level", level }, { "dofs", num_dofs }, { "l2_error", l2_error }, { "time_solver", time_solver } } );
 
     return l2_error;
 }
@@ -191,18 +204,27 @@ int main( int argc, char** argv )
     MPI_Init( &argc, &argv );
     Kokkos::ScopeGuard scope_guard( argc, argv );
 
+    util::Table table;
+
     double prev_l2_error = 1.0;
 
     for ( int level = 0; level < 6; ++level )
     {
-        double l2_error = test( level );
+        Kokkos::Timer timer;
+        timer.reset();
+        double     l2_error   = test( level, table );
+        const auto time_total = timer.seconds();
+        table.add_row( { { "level", level }, { "time_total", time_total } } );
+
         if ( level > 0 )
         {
-            std::cout << "L2 error at level " << level << " = " << l2_error << ", order = " << prev_l2_error / l2_error
-                      << std::endl;
+            table.add_row( { { "level", level }, { "order", prev_l2_error / l2_error } } );
         }
         prev_l2_error = l2_error;
     }
+
+    table.print_pretty( table.query_not_none( "order" ) );
+    table.print_pretty( table.query_not_none( "dofs" ) );
 
     MPI_Finalize();
     return 0;
