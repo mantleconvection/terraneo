@@ -36,6 +36,57 @@ using Grid3DDataVec = Kokkos::View< ScalarType*** [VecDim] >;
 template < typename ScalarType, int VecDim >
 using Grid4DDataVec = Kokkos::View< ScalarType**** [VecDim] >;
 
+template < typename GridDataType >
+constexpr int grid_data_vec_dim()
+{
+    if constexpr (
+        std::is_same_v< GridDataType, Grid0DDataScalar< typename GridDataType::value_type > > ||
+        std::is_same_v< GridDataType, Grid1DDataScalar< typename GridDataType::value_type > > ||
+        std::is_same_v< GridDataType, Grid2DDataScalar< typename GridDataType::value_type > > ||
+        std::is_same_v< GridDataType, Grid3DDataScalar< typename GridDataType::value_type > > ||
+        std::is_same_v< GridDataType, Grid4DDataScalar< typename GridDataType::value_type > > )
+    {
+        return 1;
+    }
+
+    else if constexpr (
+        std::is_same_v< GridDataType, Grid0DDataVec< typename GridDataType::value_type, 1 > > ||
+        std::is_same_v< GridDataType, Grid1DDataVec< typename GridDataType::value_type, 1 > > ||
+        std::is_same_v< GridDataType, Grid2DDataVec< typename GridDataType::value_type, 1 > > ||
+        std::is_same_v< GridDataType, Grid3DDataVec< typename GridDataType::value_type, 1 > > ||
+        std::is_same_v< GridDataType, Grid4DDataVec< typename GridDataType::value_type, 1 > > )
+    {
+        return 1;
+    }
+
+    else if constexpr (
+        std::is_same_v< GridDataType, Grid0DDataVec< typename GridDataType::value_type, 2 > > ||
+        std::is_same_v< GridDataType, Grid1DDataVec< typename GridDataType::value_type, 2 > > ||
+        std::is_same_v< GridDataType, Grid2DDataVec< typename GridDataType::value_type, 2 > > ||
+        std::is_same_v< GridDataType, Grid3DDataVec< typename GridDataType::value_type, 2 > > ||
+        std::is_same_v< GridDataType, Grid4DDataVec< typename GridDataType::value_type, 2 > > )
+    {
+        return 2;
+    }
+
+    else if constexpr (
+        std::is_same_v< GridDataType, Grid0DDataVec< typename GridDataType::value_type, 3 > > ||
+        std::is_same_v< GridDataType, Grid1DDataVec< typename GridDataType::value_type, 3 > > ||
+        std::is_same_v< GridDataType, Grid2DDataVec< typename GridDataType::value_type, 3 > > ||
+        std::is_same_v< GridDataType, Grid3DDataVec< typename GridDataType::value_type, 3 > > ||
+        std::is_same_v< GridDataType, Grid4DDataVec< typename GridDataType::value_type, 3 > > )
+    {
+        return 3;
+    }
+
+    else
+    {
+        static_assert( false );
+    }
+
+    return -1;
+}
+
 enum class BoundaryVertex : int
 {
     V_000 = 0, // (x=0, y=0, r=0)

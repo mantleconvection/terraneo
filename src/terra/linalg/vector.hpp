@@ -28,6 +28,18 @@ concept VectorLike = requires(
     { self_const.has_nan_impl( level ) } -> std::same_as< bool >;
 };
 
+template < typename T >
+concept Block2VectorLike = VectorLike< T > && requires( const T& self_const ) {
+    typename T::Block1Type;
+    typename T::Block2Type;
+
+    requires VectorLike< typename T::Block1Type >;
+    requires VectorLike< typename T::Block2Type >;
+
+    { self_const.block_1() } -> std::same_as< typename T::Block1Type >;
+    { self_const.block_2() } -> std::same_as< typename T::Block2Type >;
+};
+
 template < VectorLike Vector >
 using ScalarOf = typename Vector::ScalarType;
 
@@ -118,7 +130,56 @@ class DummyVector
     }
 };
 
+template < typename ScalarT >
+class DummyBlock2Vector
+{
+  public:
+    using ScalarType = ScalarT;
+
+    using Block1Type = DummyVector< ScalarType >;
+    using Block2Type = DummyVector< ScalarType >;
+
+    void lincomb_impl(
+        const std::vector< ScalarType >&        c,
+        const std::vector< DummyBlock2Vector >& x,
+        const ScalarType                        c0,
+        const int                               level )
+    {
+        (void) c;
+        (void) x;
+        (void) c0;
+        (void) level;
+    }
+
+    ScalarType dot_impl( const DummyBlock2Vector& x, const int level ) const
+    {
+        (void) x;
+        (void) level;
+        return 0;
+    }
+
+    ScalarType max_magnitude_impl( const int level ) const
+    {
+        (void) level;
+        return 0;
+    }
+
+    bool has_nan_impl( const int level ) const
+    {
+        (void) level;
+        return false;
+    }
+
+    DummyVector< ScalarType > block_1() const { return block_1_; }
+    DummyVector< ScalarType > block_2() const { return block_2_; }
+
+  private:
+    DummyVector< ScalarType > block_1_;
+    DummyVector< ScalarType > block_2_;
+};
+
 static_assert( VectorLike< DummyVector< double > > );
+static_assert( Block2VectorLike< DummyBlock2Vector< double > > );
 
 } // namespace detail
 

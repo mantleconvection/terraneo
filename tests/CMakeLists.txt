@@ -24,6 +24,7 @@ add_terra_test(test_mesh)
 add_terra_test(test_laplace)
 add_terra_test(test_laplace_cg)
 add_terra_test(test_mpi_smoke)
+add_terra_test(test_vector_laplace_cg)
 
 # Adding target for all the tests.
 get_property(ALL_TERRA_TESTS GLOBAL PROPERTY TERRA_TEST_TARGETS)

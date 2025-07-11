@@ -23,6 +23,16 @@ void set_constant( const grid::Grid4DDataScalar< ScalarType >& x, ScalarType val
         KOKKOS_LAMBDA( int subdomain, int i, int j, int k ) { x( subdomain, i, j, k ) = value; } );
 }
 
+template < typename ScalarType, int VecDim >
+void set_constant( const grid::Grid4DDataVec< ScalarType, VecDim >& x, ScalarType value )
+{
+    Kokkos::parallel_for(
+        "set_constant (Grid4DDataVec)",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ), x.extent( 4 ) } ),
+        KOKKOS_LAMBDA( int subdomain, int i, int j, int k, int d ) { x( subdomain, i, j, k, d ) = value; } );
+}
+
 template < typename ScalarType >
 void scale( const grid::Grid4DDataScalar< ScalarType >& x, ScalarType value )
 {
@@ -77,12 +87,69 @@ void lincomb(
     const grid::Grid4DDataScalar< ScalarType >& x_3 )
 {
     Kokkos::parallel_for(
-        "lincomb 3 args (Grid3DDataScalar)",
+        "lincomb 3 args (Grid4DDataScalar)",
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { y.extent( 0 ), y.extent( 1 ), y.extent( 2 ), y.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
             y( local_subdomain, i, j, k ) = c_0 + c_1 * x_1( local_subdomain, i, j, k ) +
                                             c_2 * x_2( local_subdomain, i, j, k ) +
                                             c_3 * x_3( local_subdomain, i, j, k );
+        } );
+}
+
+template < typename ScalarType, int VecDim >
+void lincomb(
+    const grid::Grid4DDataVec< ScalarType, VecDim >& y,
+    ScalarType                                       c_0,
+    ScalarType                                       c_1,
+    const grid::Grid4DDataVec< ScalarType, VecDim >& x_1 )
+{
+    Kokkos::parallel_for(
+        "lincomb 1 arg (Grid4DDataVec)",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0, 0 }, { y.extent( 0 ), y.extent( 1 ), y.extent( 2 ), y.extent( 3 ), y.extent( 4 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, int d ) {
+            y( local_subdomain, i, j, k, d ) = c_0 + c_1 * x_1( local_subdomain, i, j, k, d );
+        } );
+}
+
+template < typename ScalarType, int VecDim >
+void lincomb(
+    const grid::Grid4DDataVec< ScalarType, VecDim >& y,
+    ScalarType                                       c_0,
+    ScalarType                                       c_1,
+    const grid::Grid4DDataVec< ScalarType, VecDim >& x_1,
+    ScalarType                                       c_2,
+    const grid::Grid4DDataVec< ScalarType, VecDim >& x_2 )
+{
+    Kokkos::parallel_for(
+        "lincomb 2 args (Grid4DDataVec)",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0, 0 }, { y.extent( 0 ), y.extent( 1 ), y.extent( 2 ), y.extent( 3 ), y.extent( 4 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, int d ) {
+            y( local_subdomain, i, j, k, d ) =
+                c_0 + c_1 * x_1( local_subdomain, i, j, k, d ) + c_2 * x_2( local_subdomain, i, j, k, d );
+        } );
+}
+
+template < typename ScalarType, int VecDim >
+void lincomb(
+    const grid::Grid4DDataVec< ScalarType, VecDim >& y,
+    ScalarType                                       c_0,
+    ScalarType                                       c_1,
+    const grid::Grid4DDataVec< ScalarType, VecDim >& x_1,
+    ScalarType                                       c_2,
+    const grid::Grid4DDataVec< ScalarType, VecDim >& x_2,
+    ScalarType                                       c_3,
+    const grid::Grid4DDataVec< ScalarType, VecDim >& x_3 )
+{
+    Kokkos::parallel_for(
+        "lincomb 3 args (Grid4DDataVec)",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0, 0 }, { y.extent( 0 ), y.extent( 1 ), y.extent( 2 ), y.extent( 3 ), y.extent( 4 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, int d ) {
+            y( local_subdomain, i, j, k, d ) = c_0 + c_1 * x_1( local_subdomain, i, j, k, d ) +
+                                               c_2 * x_2( local_subdomain, i, j, k, d ) +
+                                               c_3 * x_3( local_subdomain, i, j, k, d );
         } );
 }
 
@@ -185,6 +252,28 @@ ScalarType masked_dot_product(
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, ScalarType& local_dot_prod ) {
             ScalarType val = x( local_subdomain, i, j, k ) * y( local_subdomain, i, j, k ) *
+                             static_cast< ScalarType >( mask( local_subdomain, i, j, k ) );
+            local_dot_prod = local_dot_prod + val;
+        },
+        Kokkos::Sum< ScalarType >( dot_prod ) );
+
+    return dot_prod;
+}
+
+template < typename ScalarType, typename MaskType, int VecDim >
+ScalarType masked_dot_product(
+    const grid::Grid4DDataVec< ScalarType, VecDim >& x,
+    const grid::Grid4DDataVec< ScalarType, VecDim >& y,
+    const grid::Grid4DDataScalar< MaskType >&        mask )
+{
+    ScalarType dot_prod = 0.0;
+
+    Kokkos::parallel_reduce(
+        "masked_dot_product",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ), x.extent( 4 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, int d, ScalarType& local_dot_prod ) {
+            ScalarType val = x( local_subdomain, i, j, k, d ) * y( local_subdomain, i, j, k, d ) *
                              static_cast< ScalarType >( mask( local_subdomain, i, j, k ) );
             local_dot_prod = local_dot_prod + val;
         },
