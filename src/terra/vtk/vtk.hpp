@@ -780,20 +780,20 @@ class VTKOutput
     }
 
     template < class ScalarFieldViewDevice >
-    void add_scalar_field( const std::string& field_name, const ScalarFieldViewDevice& field_data_view_device )
+    void add_scalar_field( const ScalarFieldViewDevice& field_data_view_device )
     {
         if ( field_data_view_device.rank() != 4 )
         {
             throw std::runtime_error( "Scalar field data view must have rank 4: (sd, x_in, y_in, r_in)." );
         }
-        validate_field_view_dimensions_for_input_grid( field_data_view_device, field_name );
+        validate_field_view_dimensions_for_input_grid( field_data_view_device, field_data_view_device.label() );
 
         // Create a host mirror and store it.
         ScalarFieldHostView h_field_data_input =
             Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace(), field_data_view_device );
 
         PointDataEntry entry;
-        entry.name                 = field_name;
+        entry.name                 = field_data_view_device.label();
         entry.num_components       = 1;
         entry.data_type_str        = "Float32";
         entry.host_view_input_data = h_field_data_input;
@@ -801,7 +801,7 @@ class VTKOutput
     }
 
     template < class VectorFieldViewDevice >
-    void add_vector_field( const std::string& field_name, const VectorFieldViewDevice& field_data_view_device )
+    void add_vector_field( const VectorFieldViewDevice& field_data_view_device )
     {
         if ( field_data_view_device.rank() != 5 )
         { // sd, x_in, y_in, r_in, comp
@@ -812,13 +812,13 @@ class VTKOutput
         {
             throw std::runtime_error( "Vector field must have at least one component." );
         }
-        validate_field_view_dimensions_for_input_grid( field_data_view_device, field_name );
+        validate_field_view_dimensions_for_input_grid( field_data_view_device, field_data_view_device.label() );
 
         VectorFieldHostView h_field_data_input =
             Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace(), field_data_view_device );
 
         PointDataEntry entry;
-        entry.name                 = field_name;
+        entry.name                 = field_data_view_device.label();
         entry.num_components       = num_vec_components;
         entry.data_type_str        = "Float32";
         entry.host_view_input_data = h_field_data_input;

@@ -2015,8 +2015,8 @@ void single_apply()
 #endif
 
     terra::vtk::VTKOutput vtk_after( subdomain_shell_coords, subdomain_radii, "laplace_apply.vtu", false );
-    vtk_after.add_scalar_field( src.label(), src );
-    vtk_after.add_scalar_field( dst.label(), dst );
+    vtk_after.add_scalar_field( src );
+    vtk_after.add_scalar_field( dst );
     vtk_after.write();
 }
 
@@ -2251,10 +2251,10 @@ void all_diamonds()
     kernels::common::lincomb( error, 0.0, 1.0, u, -1.0, solution );
 
     terra::vtk::VTKOutput vtk_after( subdomain_shell_coords, subdomain_radii, "laplace.vtu", false );
-    vtk_after.add_scalar_field( g.label(), g );
-    vtk_after.add_scalar_field( u.label(), u );
-    vtk_after.add_scalar_field( solution.label(), solution );
-    vtk_after.add_scalar_field( error.label(), error );
+    vtk_after.add_scalar_field( g );
+    vtk_after.add_scalar_field( u );
+    vtk_after.add_scalar_field( solution );
+    vtk_after.add_scalar_field( error );
     vtk_after.write();
 }
 #endif

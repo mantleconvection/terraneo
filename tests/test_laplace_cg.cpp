@@ -143,7 +143,6 @@ double test( int level, util::Table& table )
     Laplace A( domain, subdomain_shell_coords, subdomain_radii, true, false );
     Laplace A_neumann( domain, subdomain_shell_coords, subdomain_radii, false, false );
     Laplace A_neumann_diag( domain, subdomain_shell_coords, subdomain_radii, false, true );
-    Laplace A_diag( domain, subdomain_shell_coords, subdomain_radii, true, true );
 
     // Set up solution data.
     Kokkos::parallel_for(
@@ -186,10 +185,10 @@ double test( int level, util::Table& table )
     {
         vtk::VTKOutput vtk_after(
             subdomain_shell_coords, subdomain_radii, "laplace_cg_level" + std::to_string( level ) + ".vtu", false );
-        vtk_after.add_scalar_field( g.grid_data( level ).label(), g.grid_data( level ) );
-        vtk_after.add_scalar_field( u.grid_data( level ).label(), u.grid_data( level ) );
-        vtk_after.add_scalar_field( solution.grid_data( level ).label(), solution.grid_data( level ) );
-        vtk_after.add_scalar_field( error.grid_data( level ).label(), error.grid_data( level ) );
+        vtk_after.add_scalar_field( g.grid_data( level ) );
+        vtk_after.add_scalar_field( u.grid_data( level ) );
+        vtk_after.add_scalar_field( solution.grid_data( level ) );
+        vtk_after.add_scalar_field( error.grid_data( level ) );
 
         vtk_after.write();
     }

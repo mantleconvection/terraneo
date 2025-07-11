@@ -128,7 +128,7 @@ int main( int argc, char** argv )
     std::cout << "sum_mag = " << sum_mag << std::endl;
 
     terra::vtk::VTKOutput vtk( subdomain_shell_coords, subdomain_radii, "test_flag_field_unique_vertices.vtu", true );
-    vtk.add_scalar_field( u.label(), u );
+    vtk.add_scalar_field( u );
     vtk.write();
 
     MPI_Finalize();

@@ -56,7 +56,7 @@ int main( int argc, char** argv )
         SomeInterpolator( subdomain_shell_coords, subdomain_radii, data ) );
 
     terra::vtk::VTKOutput vtk( subdomain_shell_coords, subdomain_radii, "my_fancy_vtk.vtu", true );
-    vtk.add_scalar_field( data.label(), data );
+    vtk.add_scalar_field( data );
     vtk.write();
 
     MPI_Finalize();
