@@ -103,40 +103,10 @@ class VectorLaplace
         wedge_phy_surf[1][2] = quad_surface_coords[1][0];
 
         // Compute lateral part of Jacobian.
-        // For now, we only do this at a single quad point.
 
-#if 0
-        constexpr int    nq              = 2;
-        constexpr double one_over_sqrt_3 = 0.57735026918962576450914878050195745564760175127012687601860232648397767230;
-        constexpr dense::Vec< double, 3 > qp[nq] = {
-            { 1.0 / 3.0, 1.0 / 3.0, -one_over_sqrt_3 }, { 1.0 / 3.0, 1.0 / 3.0, one_over_sqrt_3 } };
-        constexpr double qw[nq] = { 1.0, 1.0 };
-#endif
-
-#if 1
-        constexpr int                     nq     = 1;
-        constexpr dense::Vec< double, 3 > qp[nq] = { { 1.0 / 3.0, 1.0 / 3.0, 0.0 } };
-        constexpr double                  qw[nq] = { 1.0 };
-#endif
-
-#if 0
-
-        constexpr int                     nq     = 6;
-        constexpr dense::Vec< double, 3 > qp[nq] = {
-            { { 0.6666666666666666, 0.1666666666666667, -0.5773502691896257 } },
-            { { 0.1666666666666667, 0.6666666666666666, -0.5773502691896257 } },
-            { { 0.1666666666666667, 0.1666666666666667, -0.5773502691896257 } },
-            { { 0.6666666666666666, 0.1666666666666667, 0.5773502691896257 } },
-            { { 0.1666666666666667, 0.6666666666666666, 0.5773502691896257 } },
-            { { 0.1666666666666667, 0.1666666666666667, 0.5773502691896257 } } };
-        constexpr double qw[nq] = {
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667 };
-#endif
+        constexpr auto nq = quad_felippa_1x1_nq;
+        constexpr auto qp = quad_felippa_1x1_qp;
+        constexpr auto qw = quad_felippa_1x1_qw;
 
         dense::Mat< double, 3, 3 > jac_lat_inv_t[num_wedges][nq] = {};
         double                     det_jac_lat[num_wedges][nq]   = {};

@@ -100,23 +100,10 @@ class VectorMass
         wedge_phy_surf[1][2] = quad_surface_coords[1][0];
 
         // Compute lateral part of Jacobian.
-        // For now, we only do this at a single quad point.
 
-        constexpr int                     nq     = 6;
-        constexpr dense::Vec< double, 3 > qp[nq] = {
-            { { 0.6666666666666666, 0.1666666666666667, -0.5773502691896257 } },
-            { { 0.1666666666666667, 0.6666666666666666, -0.5773502691896257 } },
-            { { 0.1666666666666667, 0.1666666666666667, -0.5773502691896257 } },
-            { { 0.6666666666666666, 0.1666666666666667, 0.5773502691896257 } },
-            { { 0.1666666666666667, 0.6666666666666666, 0.5773502691896257 } },
-            { { 0.1666666666666667, 0.1666666666666667, 0.5773502691896257 } } };
-        constexpr double qw[nq] = {
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667 };
+        constexpr auto nq = quad_felippa_3x2_nq;
+        constexpr auto qp = quad_felippa_3x2_qp;
+        constexpr auto qw = quad_felippa_3x2_qw;
 
         double det_jac_lat[num_wedges][nq] = {};
 

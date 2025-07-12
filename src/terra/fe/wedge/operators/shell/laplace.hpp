@@ -4,6 +4,8 @@
 #include "communication/shell/communication.hpp"
 #include "dense/vec.hpp"
 #include "fe/wedge/integrands.hpp"
+#include "fe/wedge/kernel_helpers.hpp"
+#include "fe/wedge/quadrature.hpp"
 #include "grid/shell/spherical_shell.hpp"
 #include "linalg/operator.hpp"
 #include "linalg/vector.hpp"
@@ -76,67 +78,14 @@ class Laplace
         // Gather surface points for each wedge.
         constexpr int num_wedges = 2;
 
-        // Extract vertex positions of quad
-        // (0, 0), (1, 0), (0, 1), (1, 1).
-        dense::Vec< double, 3 > quad_surface_coords[2][2];
-
-        for ( int x = x_cell; x <= x_cell + 1; x++ )
-        {
-            for ( int y = y_cell; y <= y_cell + 1; y++ )
-            {
-                for ( int d = 0; d < 3; d++ )
-                {
-                    quad_surface_coords[x - x_cell][y - y_cell]( d ) = grid_( local_subdomain_id, x, y, d );
-                }
-            }
-        }
-
-        // Sort coords for the two wedge surfaces.
         dense::Vec< double, 3 > wedge_phy_surf[num_wedges][3] = {};
-
-        wedge_phy_surf[0][0] = quad_surface_coords[0][0];
-        wedge_phy_surf[0][1] = quad_surface_coords[1][0];
-        wedge_phy_surf[0][2] = quad_surface_coords[0][1];
-
-        wedge_phy_surf[1][0] = quad_surface_coords[1][1];
-        wedge_phy_surf[1][1] = quad_surface_coords[0][1];
-        wedge_phy_surf[1][2] = quad_surface_coords[1][0];
+        wedge_physical_coords( wedge_phy_surf, grid_, local_subdomain_id, x_cell, y_cell );
 
         // Compute lateral part of Jacobian.
-        // For now, we only do this at a single quad point.
 
-#if 0
-        constexpr int    nq              = 2;
-        constexpr double one_over_sqrt_3 = 0.57735026918962576450914878050195745564760175127012687601860232648397767230;
-        constexpr dense::Vec< double, 3 > qp[nq] = {
-            { 1.0 / 3.0, 1.0 / 3.0, -one_over_sqrt_3 }, { 1.0 / 3.0, 1.0 / 3.0, one_over_sqrt_3 } };
-        constexpr double qw[nq] = { 1.0, 1.0 };
-#endif
-
-#if 1
-        constexpr int                     nq     = 1;
-        constexpr dense::Vec< double, 3 > qp[nq] = { { 1.0 / 3.0, 1.0 / 3.0, 0.0 } };
-        constexpr double                  qw[nq] = { 1.0 };
-#endif
-
-#if 0
-
-        constexpr int                     nq     = 6;
-        constexpr dense::Vec< double, 3 > qp[nq] = {
-            { { 0.6666666666666666, 0.1666666666666667, -0.5773502691896257 } },
-            { { 0.1666666666666667, 0.6666666666666666, -0.5773502691896257 } },
-            { { 0.1666666666666667, 0.1666666666666667, -0.5773502691896257 } },
-            { { 0.6666666666666666, 0.1666666666666667, 0.5773502691896257 } },
-            { { 0.1666666666666667, 0.6666666666666666, 0.5773502691896257 } },
-            { { 0.1666666666666667, 0.1666666666666667, 0.5773502691896257 } } };
-        constexpr double qw[nq] = {
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667,
-            0.1666666666666667 };
-#endif
+        constexpr auto nq = quad_felippa_1x1_nq;
+        constexpr auto qp = quad_felippa_1x1_qp;
+        constexpr auto qw = quad_felippa_1x1_qw;
 
         dense::Mat< double, 3, 3 > jac_lat_inv_t[num_wedges][nq] = {};
         double                     det_jac_lat[num_wedges][nq]   = {};
@@ -160,30 +109,6 @@ class Laplace
 
         constexpr int num_nodes_per_wedge = 6;
 
-        // Let's now gather all the shape functions and gradients we need.
-        double shape_lat[num_wedges][num_nodes_per_wedge][nq] = {};
-        double shape_rad[num_wedges][num_nodes_per_wedge][nq] = {};
-
-        double grad_shape_lat_xi[num_wedges][num_nodes_per_wedge]  = {};
-        double grad_shape_lat_eta[num_wedges][num_nodes_per_wedge] = {};
-        double grad_shape_rad[num_wedges][num_nodes_per_wedge]     = {};
-
-        for ( int wedge = 0; wedge < num_wedges; wedge++ )
-        {
-            for ( int node_idx = 0; node_idx < num_nodes_per_wedge; node_idx++ )
-            {
-                for ( int q = 0; q < nq; q++ )
-                {
-                    shape_lat[wedge][node_idx][q] = wedge::shape_lat( qp[q]( 0 ), qp[q]( 1 ) )( node_idx % 3 );
-                    shape_rad[wedge][node_idx][q] = wedge::shape_rad( qp[q]( 2 ) )( node_idx / 3 );
-                }
-
-                grad_shape_lat_xi[wedge][node_idx]  = wedge::grad_shape_lat_xi()( node_idx % 3 );
-                grad_shape_lat_eta[wedge][node_idx] = wedge::grad_shape_lat_eta()( node_idx % 3 );
-                grad_shape_rad[wedge][node_idx]     = wedge::grad_shape_rad()( node_idx / 3 );
-            }
-        }
-
         dense::Vec< double, 3 > g_rad[num_wedges][num_nodes_per_wedge][nq] = {};
         dense::Vec< double, 3 > g_lat[num_wedges][num_nodes_per_wedge][nq] = {};
 
@@ -193,14 +118,16 @@ class Laplace
             {
                 for ( int q = 0; q < nq; q++ )
                 {
-                    g_rad[wedge][node_idx][q] = jac_lat_inv_t[wedge][q] *
-                                                dense::Vec< double, 3 >{
-                                                    grad_shape_lat_xi[wedge][node_idx] * shape_rad[wedge][node_idx][q],
-                                                    grad_shape_lat_eta[wedge][node_idx] * shape_rad[wedge][node_idx][q],
-                                                    0.0 };
+                    g_rad[wedge][node_idx][q] =
+                        jac_lat_inv_t[wedge][q] *
+                        dense::Vec< double, 3 >{
+                            grad_shape_lat_xi_wedge_node( node_idx ) * shape_rad_wedge_node( node_idx, qp[q] ),
+                            grad_shape_lat_eta_wedge_node( node_idx ) * shape_rad_wedge_node( node_idx, qp[q] ),
+                            0.0 };
 
                     g_lat[wedge][node_idx][q] =
-                        jac_lat_inv_t[wedge][q] * dense::Vec< double, 3 >{ 0.0, 0.0, shape_lat[wedge][node_idx][q] };
+                        jac_lat_inv_t[wedge][q] *
+                        dense::Vec< double, 3 >{ 0.0, 0.0, shape_lat_wedge_node( node_idx, qp[q] ) };
                 }
             }
         }
@@ -229,9 +156,11 @@ class Laplace
                     for ( int j = 0; j < num_nodes_per_wedge; j++ )
                     {
                         const dense::Vec< double, 3 > grad_i =
-                            r_inv * g_rad[wedge][i][q] + grad_shape_rad[wedge][i] * grad_r_inv * g_lat[wedge][i][q];
+                            r_inv * g_rad[wedge][i][q] +
+                            grad_shape_rad_wedge_node( i ) * grad_r_inv * g_lat[wedge][i][q];
                         const dense::Vec< double, 3 > grad_j =
-                            r_inv * g_rad[wedge][j][q] + grad_shape_rad[wedge][j] * grad_r_inv * g_lat[wedge][j][q];
+                            r_inv * g_rad[wedge][j][q] +
+                            grad_shape_rad_wedge_node( j ) * grad_r_inv * g_lat[wedge][j][q];
 
                         A[wedge]( i, j ) += qw[q] * ( grad_i.dot( grad_j ) * r * r * grad_r * det_jac_lat[wedge][q] );
                     }
@@ -281,58 +210,19 @@ class Laplace
 
         if ( diagonal_ )
         {
-            for ( int wedge = 0; wedge < num_wedges; wedge++ )
-            {
-                for ( int i = 0; i < 6; i++ )
-                {
-                    for ( int j = 0; j < 6; j++ )
-                    {
-                        if ( i != j )
-                        {
-                            A[wedge]( i, j ) = 0.0;
-                        }
-                    }
-                }
-            }
+            A[0] = A[0].diagonal();
+            A[1] = A[1].diagonal();
         }
 
         dense::Vec< double, 6 > src[num_wedges];
-
-        src[0]( 0 ) = src_( local_subdomain_id, x_cell, y_cell, r_cell );
-        src[0]( 1 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell );
-        src[0]( 2 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell );
-        src[0]( 3 ) = src_( local_subdomain_id, x_cell, y_cell, r_cell + 1 );
-        src[0]( 4 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 );
-        src[0]( 5 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 );
-
-        src[1]( 0 ) = src_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell );
-        src[1]( 1 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell );
-        src[1]( 2 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell );
-        src[1]( 3 ) = src_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell + 1 );
-        src[1]( 4 ) = src_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 );
-        src[1]( 5 ) = src_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 );
+        extract_local_wedge_scalar_coefficients( src, local_subdomain_id, x_cell, y_cell, r_cell, src_ );
 
         dense::Vec< double, 6 > dst[num_wedges];
 
         dst[0] = A[0] * src[0];
         dst[1] = A[1] * src[1];
 
-        // std::cout << A[0] << std::endl;
-        // std::cout << A[1] << std::endl;
-
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell, r_cell ), dst[0]( 0 ) );
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell ), dst[0]( 1 ) );
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell ), dst[0]( 2 ) );
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell, r_cell + 1 ), dst[0]( 3 ) );
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 ), dst[0]( 4 ) );
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 ), dst[0]( 5 ) );
-
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell ), dst[1]( 0 ) );
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell ), dst[1]( 1 ) );
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell ), dst[1]( 2 ) );
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell + 1 ), dst[1]( 3 ) );
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell, y_cell + 1, r_cell + 1 ), dst[1]( 4 ) );
-        Kokkos::atomic_add( &dst_( local_subdomain_id, x_cell + 1, y_cell, r_cell + 1 ), dst[1]( 5 ) );
+        atomically_add_local_wedge_scalar_coefficients( dst_, local_subdomain_id, x_cell, y_cell, r_cell, dst );
     }
 };
 

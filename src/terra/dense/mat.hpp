@@ -193,6 +193,20 @@ struct Mat
             static_assert( Rows == -1, "inv() only implemented for 2x2 and 3x3 matrices" );
         }
     }
+
+    KOKKOS_INLINE_FUNCTION
+    constexpr Mat diagonal() const
+    {
+        Mat result;
+        for ( int i = 0; i < Rows; ++i )
+        {
+            for ( int j = 0; j < Cols; ++j )
+            {
+                result( i, j ) = ( i == j ) ? data[i][j] : T( 0 );
+            }
+        }
+        return result;
+    }
 };
 
 template < typename T, int Rows, int Cols >
