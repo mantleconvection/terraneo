@@ -14,22 +14,20 @@
 ///   0 <= xi + eta <= 1
 ///
 /// Node enumeration:
-///   r_node_idx = r_cell_idx + 1 (outer)
 ///
-///   6--7
-///   |\ |
-///   | \|
-///   4--5
+///   r_node_idx = r_cell_idx + 1 (outer):
 ///
-///   r_node_idx = r_cell_idx (inner)
+///   5
+///   |\
+///   | \
+///   3--4
 ///
-///   2--3
-///   |\ |
-///   | \|
+///   r_node_idx = r_cell_idx (inner):
+///
+///   2
+///   |\
+///   | \
 ///   0--1
-///
-///  Element 0 = (0, 1, 2, 4, 5, 6)
-///  Element 1 = (3, 2, 1, 7, 6, 5)
 ///
 /// Enumeration of shape functions:
 ///
