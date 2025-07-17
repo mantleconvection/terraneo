@@ -360,10 +360,12 @@ std::pair< double, double > test( int level, util::Table& table )
     solve( pminres, K, w, b, level, table );
 
     const double avg_pressure_solution =
-        kernels::common::masked_sum( solution.block_2().grid_data( level ), solution.block_2().mask_data( level ) ) /
+        kernels::common::masked_sum(
+            solution.block_2().grid_data( level ), solution.block_2().mask_data( level ), grid::shell::mask_owned() ) /
         num_dofs_pressure;
     const double avg_pressure_approximation =
-        kernels::common::masked_sum( w.block_2().grid_data( level ), w.block_2().mask_data( level ) ) /
+        kernels::common::masked_sum(
+            w.block_2().grid_data( level ), w.block_2().mask_data( level ), grid::shell::mask_owned() ) /
         num_dofs_pressure;
 
     linalg::lincomb( solution.block_2(), { 1.0 }, { solution.block_2() }, -avg_pressure_solution, level );

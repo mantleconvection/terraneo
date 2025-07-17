@@ -5,6 +5,7 @@
 #include "communication/shell/communication.hpp"
 #include "grid/shell/spherical_shell.hpp"
 #include "kernels/common/grid_operations.hpp"
+#include "terra/grid/shell/mask_types.hpp"
 #include "vector.hpp"
 
 namespace terra::linalg {
@@ -63,16 +64,45 @@ inline void
             KOKKOS_LAMBDA( const int x, const int y, const int r ) {
                 if ( tmp_data_for_global_subdomain_indices( local_subdomain_id, x, y, r ) == global_subdomain_id )
                 {
-                    mask_data( local_subdomain_id, x, y, r ) = 1;
+                    util::set_bits( mask_data( local_subdomain_id, x, y, r ), grid::shell::mask_owned() );
                 }
                 else
                 {
-                    mask_data( local_subdomain_id, x, y, r ) = 0;
+                    util::set_bits( mask_data( local_subdomain_id, x, y, r ), grid::shell::mask_non_owned() );
                 }
             } );
 
         Kokkos::fence();
     }
+
+    if ( domain.domain_info().num_subdomains_in_radial_direction() != 1 )
+    {
+        throw std::runtime_error( "setup_mask_data: not implemented for more than one subdomain in radial direction" );
+    }
+
+    const int num_shells = domain.domain_info().subdomain_num_nodes_radially();
+
+    Kokkos::parallel_for(
+        "set_boundary_flags",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0 },
+            { mask_data.extent( 0 ), mask_data.extent( 1 ), mask_data.extent( 2 ), mask_data.extent( 3 ) } ),
+        KOKKOS_LAMBDA( const int local_subdomain_id, const int x, const int y, const int r ) {
+            if ( r == 0 )
+            {
+                util::set_bits( mask_data( local_subdomain_id, x, y, r ), grid::shell::mask_domain_boundary_cmb() );
+            }
+            else if ( r == num_shells - 1 )
+            {
+                util::set_bits( mask_data( local_subdomain_id, x, y, r ), grid::shell::mask_domain_boundary_surface() );
+            }
+            else
+            {
+                util::set_bits( mask_data( local_subdomain_id, x, y, r ), grid::shell::mask_domain_inner() );
+            }
+        } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarT >
@@ -127,7 +157,8 @@ class VectorQ1Scalar
 
     ScalarType dot_impl( const VectorQ1Scalar& x, const int level ) const
     {
-        return kernels::common::masked_dot_product( grid_data( level ), x.grid_data( level ), mask_data( level ) );
+        return kernels::common::masked_dot_product(
+            grid_data( level ), x.grid_data( level ), mask_data( level ), grid::shell::mask_owned() );
     }
 
     ScalarType max_abs_entry_impl( const int level ) const
@@ -231,7 +262,7 @@ class VectorQ1Vec
 
     ScalarType dot_impl( const VectorQ1Vec& x, const int level ) const
     {
-        return kernels::common::masked_dot_product( grid_data( level ), x.grid_data( level ), mask_data( level ) );
+        return kernels::common::masked_dot_product( grid_data( level ), x.grid_data( level ), mask_data( level ), grid::shell::mask_owned() );
     }
 
     ScalarType max_abs_entry_impl( const int level ) const

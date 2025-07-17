@@ -2,6 +2,7 @@
 
 #include "../../kokkos/kokkos_wrapper.hpp"
 #include "grid/grid_types.hpp"
+#include "terra/util/bit_masks.hpp"
 
 namespace terra::kernels::common {
 
@@ -46,6 +47,26 @@ void scale( const grid::Grid4DDataScalar< ScalarType >& x, ScalarType value )
         "scale (Grid3DDataScalar)",
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) { x( local_subdomain, i, j, k ) *= value; } );
+
+    Kokkos::fence();
+}
+
+template < typename ScalarType >
+void assign_masked_else_keep_old(
+    const grid::Grid4DDataScalar< ScalarType >&     dst,
+    const grid::Grid4DDataScalar< ScalarType >&     src,
+    const grid::Grid4DDataScalar< util::MaskType >& mask_grid,
+    const util::MaskAndValue                        mask_and_value )
+{
+    Kokkos::parallel_for(
+        "assign_masked",
+        Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { dst.extent( 0 ), dst.extent( 1 ), dst.extent( 2 ), dst.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
+            const ScalarType mask_val =
+                util::check_bits( mask_grid( local_subdomain, i, j, k ), mask_and_value ) ? 1.0 : 0.0;
+            dst( local_subdomain, i, j, k ) =
+                mask_val * src( local_subdomain, i, j, k ) + ( 1.0 - mask_val ) * dst( local_subdomain, i, j, k );
+        } );
 
     Kokkos::fence();
 }
@@ -293,7 +314,10 @@ ScalarType sum_of_absolutes( const grid::Grid4DDataScalar< ScalarType >& x )
 }
 
 template < typename ScalarType, typename MaskType >
-ScalarType masked_sum( const grid::Grid4DDataScalar< ScalarType >& x, const grid::Grid4DDataScalar< MaskType >& mask )
+ScalarType masked_sum(
+    const grid::Grid4DDataScalar< ScalarType >& x,
+    const grid::Grid4DDataScalar< MaskType >&   mask,
+    const util::MaskAndValue&                   mask_and_value )
 {
     ScalarType sum = 0.0;
 
@@ -301,9 +325,10 @@ ScalarType masked_sum( const grid::Grid4DDataScalar< ScalarType >& x, const grid
         "masked_sum",
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, ScalarType& local_sum ) {
-            ScalarType val =
-                x( local_subdomain, i, j, k ) * static_cast< ScalarType >( mask( local_subdomain, i, j, k ) );
-            local_sum = local_sum + val;
+            const ScalarType mask_val =
+                util::check_bits( mask( local_subdomain, i, j, k ), mask_and_value ) ? 1.0 : 0.0;
+            ScalarType val = x( local_subdomain, i, j, k ) * mask_val;
+            local_sum      = local_sum + val;
         },
         Kokkos::Sum< ScalarType >( sum ) );
 
@@ -335,7 +360,8 @@ template < typename ScalarType, typename MaskType >
 ScalarType masked_dot_product(
     const grid::Grid4DDataScalar< ScalarType >& x,
     const grid::Grid4DDataScalar< ScalarType >& y,
-    const grid::Grid4DDataScalar< MaskType >&   mask )
+    const grid::Grid4DDataScalar< MaskType >&   mask,
+    const util::MaskAndValue&                   mask_and_value )
 {
     ScalarType dot_prod = 0.0;
 
@@ -343,8 +369,9 @@ ScalarType masked_dot_product(
         "masked_dot_product",
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, ScalarType& local_dot_prod ) {
-            ScalarType val = x( local_subdomain, i, j, k ) * y( local_subdomain, i, j, k ) *
-                             static_cast< ScalarType >( mask( local_subdomain, i, j, k ) );
+            const ScalarType mask_val =
+                util::check_bits( mask( local_subdomain, i, j, k ), mask_and_value ) ? 1.0 : 0.0;
+            ScalarType val = x( local_subdomain, i, j, k ) * y( local_subdomain, i, j, k ) * mask_val;
             local_dot_prod = local_dot_prod + val;
         },
         Kokkos::Sum< ScalarType >( dot_prod ) );
@@ -358,7 +385,8 @@ template < typename ScalarType, typename MaskType, int VecDim >
 ScalarType masked_dot_product(
     const grid::Grid4DDataVec< ScalarType, VecDim >& x,
     const grid::Grid4DDataVec< ScalarType, VecDim >& y,
-    const grid::Grid4DDataScalar< MaskType >&        mask )
+    const grid::Grid4DDataScalar< MaskType >&        mask,
+    const util::MaskAndValue&                        mask_and_value )
 {
     ScalarType dot_prod = 0.0;
 
@@ -367,8 +395,9 @@ ScalarType masked_dot_product(
         Kokkos::MDRangePolicy(
             { 0, 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ), x.extent( 4 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, int d, ScalarType& local_dot_prod ) {
-            ScalarType val = x( local_subdomain, i, j, k, d ) * y( local_subdomain, i, j, k, d ) *
-                             static_cast< ScalarType >( mask( local_subdomain, i, j, k ) );
+            const ScalarType mask_val =
+                util::check_bits( mask( local_subdomain, i, j, k ), mask_and_value ) ? 1.0 : 0.0;
+            ScalarType val = x( local_subdomain, i, j, k, d ) * y( local_subdomain, i, j, k, d ) * mask_val;
             local_dot_prod = local_dot_prod + val;
         },
         Kokkos::Sum< ScalarType >( dot_prod ) );

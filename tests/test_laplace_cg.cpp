@@ -1,6 +1,7 @@
 
 
 #include "../src/terra/communication/shell/communication.hpp"
+#include "fe/strong_algebraic_dirichlet_enforcement.hpp"
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/operators/shell/laplace.hpp"
 #include "fe/wedge/operators/shell/laplace_simple.hpp"
@@ -148,14 +149,9 @@ double test( int level, util::Table& table )
     auto b        = linalg::allocate_vector_q1_scalar< ScalarType >( "b", domain, level );
     auto r        = linalg::allocate_vector_q1_scalar< ScalarType >( "r", domain, level );
 
-    auto mask_data      = grid::shell::allocate_scalar_grid< unsigned char >( "mask_data", domain );
-    auto mask_data_long = grid::shell::allocate_scalar_grid< long >( "mask_data_double", domain );
+    auto mask_data = grid::shell::allocate_scalar_grid< unsigned char >( "mask_data", domain );
 
     linalg::setup_mask_data( domain, mask_data );
-
-    kernels::common::cast( mask_data_long, mask_data );
-
-    const auto num_dofs = kernels::common::dot_product( mask_data_long, mask_data_long );
 
     u.add_mask_data( mask_data, level );
     g.add_mask_data( mask_data, level );
@@ -165,6 +161,9 @@ double test( int level, util::Table& table )
     error.add_mask_data( mask_data, level );
     b.add_mask_data( mask_data, level );
     r.add_mask_data( mask_data, level );
+
+    linalg::assign( tmp, 1.0, level );
+    const auto num_dofs = linalg::dot( tmp, tmp, level );
 
     const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
     const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
@@ -205,16 +204,8 @@ double test( int level, util::Table& table )
 
     linalg::apply( M, tmp, b, level );
 
-    linalg::apply( A_neumann_diag, g, Adiagg, level );
-    linalg::apply( A_neumann, g, tmp, level );
-
-    linalg::lincomb( b, { 1.0, -1.0 }, { b, tmp }, level );
-
-    Kokkos::parallel_for(
-        "set on boundary",
-        grid::shell::local_domain_md_range_policy_nodes( domain ),
-        SetOnBoundary(
-            Adiagg.grid_data( level ), b.grid_data( level ), domain.domain_info().subdomain_num_nodes_radially() ) );
+    fe::strong_algebraic_dirichlet_enforcement_poisson_like(
+        A_neumann, A_neumann_diag, g, tmp, b, mask_data, level, grid::shell::mask_domain_boundary() );
 
     Kokkos::fence();
 

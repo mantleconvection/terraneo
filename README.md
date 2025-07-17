@@ -7,7 +7,7 @@
 - [ ] advection-diffusion discretization / solver
 - [ ] GMRES
 - [ ] multigrid
-- [ ] MPI parallel execution (multi-GPU)
+- [ ] MPI parallel execution (multi-GPU, multi-node CPU)
 - [ ] intra-diamond subdomain communication
 - [ ] variable viscosity
 - [ ] plates
@@ -21,7 +21,8 @@
 - [ ] matrix export / assembly
 - [ ] CPU SIMD kernels
 
-### Documentation / cleanup
+### Documentation / cleanup / refactoring
 
 - [ ] Github page
 - [ ] Doxygen page
+- [ ] move mask stuff that generalizes away from shell namespace
