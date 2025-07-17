@@ -915,4 +915,48 @@ void recv_unpack_and_add_local_subdomain_boundaries(
     }
 }
 
+/// @brief Executes packing, sending, receiving, and unpacking operations for the shell.
+///
+/// IMPORTANT NOTE: THIS MAY COME WITH A PERFORMANCE PENALTY.
+///                 This (re-)allocates send and receive buffers for each call, which could be inefficient.
+///                 Use only where performance does not matter (e.g. in tests).
+template < typename ScalarType >
+void send_recv(
+    const grid::shell::DistributedDomain& domain,
+    grid::Grid4DDataScalar< ScalarType >& grid,
+    const CommuncationReduction           reduction = CommuncationReduction::SUM )
+{
+    SubdomainNeighborhoodSendBuffer< ScalarType > send_buffers( domain );
+    SubdomainNeighborhoodRecvBuffer< ScalarType > recv_buffers( domain );
+
+    std::vector< std::array< int, 11 > > expected_recvs_metadata;
+    std::vector< MPI_Request >           expected_recvs_requests;
+
+    shell::pack_and_send_local_subdomain_boundaries(
+        domain, grid, send_buffers, expected_recvs_requests, expected_recvs_metadata );
+    shell::recv_unpack_and_add_local_subdomain_boundaries(
+        domain, grid, recv_buffers, expected_recvs_requests, expected_recvs_metadata, reduction );
+}
+
+/// @brief Executes packing, sending, receiving, and unpacking operations for the shell.
+///
+/// Send and receive buffers must be passed. This is the preferred way to execute communication since the buffers
+/// can be reused.
+template < typename ScalarType >
+void send_recv(
+    const grid::shell::DistributedDomain&          domain,
+    grid::Grid4DDataScalar< ScalarType >&          grid,
+    SubdomainNeighborhoodSendBuffer< ScalarType >& send_buffers,
+    SubdomainNeighborhoodRecvBuffer< ScalarType >& recv_buffers,
+    const CommuncationReduction                    reduction = CommuncationReduction::SUM )
+{
+    std::vector< std::array< int, 11 > > expected_recvs_metadata;
+    std::vector< MPI_Request >           expected_recvs_requests;
+
+    shell::pack_and_send_local_subdomain_boundaries(
+        domain, grid, send_buffers, expected_recvs_requests, expected_recvs_metadata );
+    shell::recv_unpack_and_add_local_subdomain_boundaries(
+        domain, grid, recv_buffers, expected_recvs_requests, expected_recvs_metadata, reduction );
+}
+
 } // namespace terra::communication::shell
