@@ -20,6 +20,14 @@ inline int num_processes()
     return num_processes;
 }
 
+class MPIScopeGuard
+{
+  public:
+    MPIScopeGuard( int* argc, char*** argv ) { MPI_Init( argc, argv ); }
+
+    ~MPIScopeGuard() { MPI_Finalize(); }
+};
+
 template < typename T >
 MPI_Datatype mpi_datatype()
 {
