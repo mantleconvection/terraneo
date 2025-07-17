@@ -168,7 +168,7 @@ double test( int level, util::Table& table )
     const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
     const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
 
-    using Laplace = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
+    using Laplace = fe::wedge::operators::shell::Laplace< ScalarType >;
 
     Laplace A( domain, subdomain_shell_coords, subdomain_radii, true, false );
     Laplace A_neumann( domain, subdomain_shell_coords, subdomain_radii, false, false );
@@ -184,17 +184,23 @@ double test( int level, util::Table& table )
         local_domain_md_range_policy_nodes( domain ),
         SolutionInterpolator( subdomain_shell_coords, subdomain_radii, solution.grid_data( level ), false ) );
 
+    Kokkos::fence();
+
     // Set up boundary data.
     Kokkos::parallel_for(
         "boundary interpolation",
         local_domain_md_range_policy_nodes( domain ),
         SolutionInterpolator( subdomain_shell_coords, subdomain_radii, g.grid_data( level ), true ) );
 
+    Kokkos::fence();
+
     // Set up rhs data.
     Kokkos::parallel_for(
         "rhs interpolation",
         local_domain_md_range_policy_nodes( domain ),
         RHSInterpolator( subdomain_shell_coords, subdomain_radii, tmp.grid_data( level ) ) );
+
+    Kokkos::fence();
 
     linalg::apply( M, tmp, b, level );
 
@@ -208,6 +214,8 @@ double test( int level, util::Table& table )
         grid::shell::local_domain_md_range_policy_nodes( domain ),
         SetOnBoundary(
             Adiagg.grid_data( level ), b.grid_data( level ), domain.domain_info().subdomain_num_nodes_radially() ) );
+
+    Kokkos::fence();
 
     linalg::solvers::IterativeSolverParameters solver_params{ 100, 1e-12, 1e-12 };
 

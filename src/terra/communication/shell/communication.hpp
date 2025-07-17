@@ -909,6 +909,7 @@ void recv_unpack_and_add_local_subdomain_boundaries(
 
         if ( all_done )
         {
+            Kokkos::fence();
             break;
         }
     }

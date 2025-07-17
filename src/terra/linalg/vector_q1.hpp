@@ -28,10 +28,13 @@ inline void
 
         const auto global_subdomain_id = subdomain_info.global_id();
 
-        terra::kernels::common::set_constant(
-            terra::grid::Grid3DDataScalar< int >(
-                tmp_data_for_global_subdomain_indices, local_subdomain_id, Kokkos::ALL, Kokkos::ALL, Kokkos::ALL ),
-            global_subdomain_id );
+        Kokkos::parallel_for(
+            "set_global_subdomain_id",
+            Kokkos::MDRangePolicy(
+                { 0, 0, 0 }, { mask_data.extent( 1 ), mask_data.extent( 2 ), mask_data.extent( 3 ) } ),
+            KOKKOS_LAMBDA( const int x, const int y, const int r ) {
+                tmp_data_for_global_subdomain_indices( local_subdomain_id, x, y, r ) = global_subdomain_id;
+            } );
     }
 
     // Communicate and reduce with minimum.
@@ -67,6 +70,8 @@ inline void
                     mask_data( local_subdomain_id, x, y, r ) = 0;
                 }
             } );
+
+        Kokkos::fence();
     }
 }
 

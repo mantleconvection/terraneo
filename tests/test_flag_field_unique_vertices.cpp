@@ -75,9 +75,9 @@ int main( int argc, char** argv )
     }
 
     // Check global min/max/sum.
-    auto min_mag = terra::kernels::common::min_abs_entry( u );
-    auto max_mag = terra::kernels::common::max_abs_entry( u );
-    auto sum_mag = terra::kernels::common::sum_of_absolutes( u );
+    min_mag = terra::kernels::common::min_abs_entry( u );
+    max_mag = terra::kernels::common::max_abs_entry( u );
+    sum_mag = terra::kernels::common::sum_of_absolutes( u );
 
     std::cout << "Before comm" << std::endl;
     std::cout << "min_mag = " << min_mag << std::endl;

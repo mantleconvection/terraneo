@@ -12,6 +12,8 @@ void set_constant( const grid::Grid3DDataScalar< ScalarType >& x, ScalarType val
         "set_constant (Grid3DDataScalar)",
         Kokkos::MDRangePolicy( { 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ) } ),
         KOKKOS_LAMBDA( int i, int j, int k ) { x( i, j, k ) = value; } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType >
@@ -21,6 +23,8 @@ void set_constant( const grid::Grid4DDataScalar< ScalarType >& x, ScalarType val
         "set_constant (Grid4DDataScalar)",
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ) } ),
         KOKKOS_LAMBDA( int subdomain, int i, int j, int k ) { x( subdomain, i, j, k ) = value; } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType, int VecDim >
@@ -31,6 +35,8 @@ void set_constant( const grid::Grid4DDataVec< ScalarType, VecDim >& x, ScalarTyp
         Kokkos::MDRangePolicy(
             { 0, 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ), x.extent( 4 ) } ),
         KOKKOS_LAMBDA( int subdomain, int i, int j, int k, int d ) { x( subdomain, i, j, k, d ) = value; } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType >
@@ -40,6 +46,8 @@ void scale( const grid::Grid4DDataScalar< ScalarType >& x, ScalarType value )
         "scale (Grid3DDataScalar)",
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) { x( local_subdomain, i, j, k ) *= value; } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType >
@@ -55,6 +63,8 @@ void lincomb(
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
             y( local_subdomain, i, j, k ) = c_0 + c_1 * x_1( local_subdomain, i, j, k );
         } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType >
@@ -73,6 +83,8 @@ void lincomb(
             y( local_subdomain, i, j, k ) =
                 c_0 + c_1 * x_1( local_subdomain, i, j, k ) + c_2 * x_2( local_subdomain, i, j, k );
         } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType >
@@ -94,6 +106,8 @@ void lincomb(
                                             c_2 * x_2( local_subdomain, i, j, k ) +
                                             c_3 * x_3( local_subdomain, i, j, k );
         } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType, int VecDim >
@@ -110,6 +124,8 @@ void lincomb(
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, int d ) {
             y( local_subdomain, i, j, k, d ) = c_0 + c_1 * x_1( local_subdomain, i, j, k, d );
         } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType, int VecDim >
@@ -129,6 +145,8 @@ void lincomb(
             y( local_subdomain, i, j, k, d ) =
                 c_0 + c_1 * x_1( local_subdomain, i, j, k, d ) + c_2 * x_2( local_subdomain, i, j, k, d );
         } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType, int VecDim >
@@ -151,6 +169,8 @@ void lincomb(
                                                c_2 * x_2( local_subdomain, i, j, k, d ) +
                                                c_3 * x_3( local_subdomain, i, j, k, d );
         } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType >
@@ -162,6 +182,8 @@ void invert_inplace( const grid::Grid4DDataScalar< ScalarType >& y )
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
             y( local_subdomain, i, j, k ) = 1.0 / y( local_subdomain, i, j, k );
         } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType >
@@ -175,6 +197,8 @@ void mult_elementwise_inplace(
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
             y( local_subdomain, i, j, k ) *= x( local_subdomain, i, j, k );
         } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType >
@@ -189,6 +213,9 @@ ScalarType min_entry( const grid::Grid4DDataScalar< ScalarType >& x )
             local_min      = Kokkos::min( local_min, val );
         },
         Kokkos::Min< ScalarType >( min_val ) );
+
+    Kokkos::fence();
+
     return min_val;
 }
 
@@ -204,6 +231,9 @@ ScalarType min_abs_entry( const grid::Grid4DDataScalar< ScalarType >& x )
             local_min      = Kokkos::min( local_min, val );
         },
         Kokkos::Min< ScalarType >( min_mag ) );
+
+    Kokkos::fence();
+
     return min_mag;
 }
 
@@ -219,6 +249,9 @@ ScalarType max_abs_entry( const grid::Grid4DDataScalar< ScalarType >& x )
             local_max      = Kokkos::max( local_max, val );
         },
         Kokkos::Max< ScalarType >( max_mag ) );
+
+    Kokkos::fence();
+
     return max_mag;
 }
 
@@ -235,6 +268,9 @@ ScalarType max_abs_entry( const grid::Grid4DDataVec< ScalarType, VecDim >& x )
             local_max      = Kokkos::max( local_max, val );
         },
         Kokkos::Max< ScalarType >( max_mag ) );
+
+    Kokkos::fence();
+
     return max_mag;
 }
 
@@ -250,6 +286,9 @@ ScalarType sum_of_absolutes( const grid::Grid4DDataScalar< ScalarType >& x )
             local_sum_abs  = local_sum_abs + val;
         },
         Kokkos::Sum< ScalarType >( sum_abs ) );
+
+    Kokkos::fence();
+
     return sum_abs;
 }
 
@@ -268,6 +307,8 @@ ScalarType masked_sum( const grid::Grid4DDataScalar< ScalarType >& x, const grid
         },
         Kokkos::Sum< ScalarType >( sum ) );
 
+    Kokkos::fence();
+
     return sum;
 }
 
@@ -284,6 +325,8 @@ ScalarType dot_product( const grid::Grid4DDataScalar< ScalarType >& x, const gri
             local_dot_prod = local_dot_prod + val;
         },
         Kokkos::Sum< ScalarType >( dot_prod ) );
+
+    Kokkos::fence( "dot_product" );
 
     return dot_prod;
 }
@@ -305,6 +348,8 @@ ScalarType masked_dot_product(
             local_dot_prod = local_dot_prod + val;
         },
         Kokkos::Sum< ScalarType >( dot_prod ) );
+
+    Kokkos::fence( "masked_dot_product" );
 
     return dot_prod;
 }
@@ -328,6 +373,8 @@ ScalarType masked_dot_product(
         },
         Kokkos::Sum< ScalarType >( dot_prod ) );
 
+    Kokkos::fence( "masked_dot_product" );
+
     return dot_prod;
 }
 
@@ -344,6 +391,8 @@ bool has_nan( const grid::Grid4DDataScalar< ScalarType >& x )
         },
         Kokkos::LOr< bool >( has_nan ) );
 
+    Kokkos::fence();
+
     return has_nan;
 }
 
@@ -356,6 +405,8 @@ void cast( const grid::Grid4DDataScalar< ScalarTypeDst >& dst, const grid::Grid4
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
             dst( local_subdomain, i, j, k ) = static_cast< ScalarTypeDst >( src( local_subdomain, i, j, k ) );
         } );
+
+    Kokkos::fence();
 }
 
 } // namespace terra::kernels::common

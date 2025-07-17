@@ -65,6 +65,8 @@ class Mass
 
         Kokkos::parallel_for( "matvec", grid::shell::local_domain_md_range_policy_cells( domain_ ), *this );
 
+        Kokkos::fence();
+
         if ( operator_communication_mode == linalg::OperatorCommunicationMode::CommunicateAdditively )
         {
             std::vector< std::array< int, 11 > > expected_recvs_metadata;
@@ -91,10 +93,10 @@ class Mass
         constexpr auto num_quad_points = quad_felippa_3x2_num_quad_points;
 
         dense::Vec< double, 3 > quad_points[num_quad_points];
-        double quad_weights[num_quad_points];
+        double                  quad_weights[num_quad_points];
 
         quad_felippa_3x2_quad_points( quad_points );
-        quad_felippa_3x2_quad_weights(quad_weights);
+        quad_felippa_3x2_quad_weights( quad_weights );
 
         double det_jac_lat[num_wedges_per_hex_cell][num_quad_points] = {};
 
