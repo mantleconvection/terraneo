@@ -52,13 +52,10 @@ struct VelocityInterpolator
     void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
     {
         const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
-#if 1
+
         data_( local_subdomain_id, x, y, r, 0 ) = -coords( 1 );
         data_( local_subdomain_id, x, y, r, 1 ) = coords( 0 );
         data_( local_subdomain_id, x, y, r, 2 ) = 0.0;
-#else
-
-#endif
     }
 };
 
@@ -155,7 +152,6 @@ void test( int level, util::Table& table )
     linalg::solvers::IterativeSolverParameters solver_params{ 1000, 1e-12, 1e-12 };
 
     linalg::solvers::PBiCGStab< AD > bicgstab( 2, solver_params, tmps );
-    // linalg::solvers::PCG< AD > bicgstab( solver_params, tmps[0], tmps[1], tmps[2], tmps[3] );
     bicgstab.set_tag( "bicgstab_solver_level_" + std::to_string( level ) );
 
     const int timesteps = 10;
