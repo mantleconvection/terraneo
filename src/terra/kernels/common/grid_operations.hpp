@@ -473,14 +473,7 @@ void rand( const grid::Grid4DDataScalar< ScalarTypeDst >& dst )
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { dst.extent( 0 ), dst.extent( 1 ), dst.extent( 2 ), dst.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
             auto generator = random_pool.get_state();
-            if constexpr ( std::is_same_v< ScalarTypeDst, double > )
-            {
-                dst( local_subdomain, i, j, k ) = generator.drand();
-            }
-            else if constexpr ( std::is_same_v< ScalarTypeDst, float > )
-            {
-                dst( local_subdomain, i, j, k ) = generator.frand();
-            }
+            dst( local_subdomain, i, j, k ) = static_cast< ScalarTypeDst >( generator.drand() );
             random_pool.free_state( generator );
         } );
 
