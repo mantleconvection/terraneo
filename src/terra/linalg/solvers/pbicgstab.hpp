@@ -65,17 +65,37 @@ class PBiCGStab
 
         const ScalarType initial_residual = std::sqrt( dot( residual(), residual(), level ) );
 
-        if ( statistics.has_value() )
-        {
-            statistics->get().add_row(
-                { { "tag", tag_ },
-                  { "iteration", 0 },
-                  { "relative_residual", 1.0 },
-                  { "absolute_residual", initial_residual } } );
-        }
+        ScalarType absolute_residual = initial_residual;
+        ScalarType relative_residual = 1.0;
+        int        iteration         = 0;
+
+        auto add_table_row = [&]( bool final_iteration ) {
+            if ( statistics.has_value() )
+            {
+                if ( final_iteration )
+                {
+                    statistics->get().add_row(
+                        { { "tag", tag_ },
+                          { "final_iteration", iteration },
+                          { "relative_residual", relative_residual },
+                          { "absolute_residual", absolute_residual } } );
+                }
+                else
+                {
+                    statistics->get().add_row(
+                        { { "tag", tag_ },
+                          { "iteration", iteration },
+                          { "relative_residual", relative_residual },
+                          { "absolute_residual", absolute_residual } } );
+                }
+            }
+        };
+
+        add_table_row( false );
 
         if ( initial_residual < params_.absolute_residual_tolerance() )
         {
+            add_table_row( true );
             return;
         }
 
@@ -86,7 +106,7 @@ class PBiCGStab
 
         Eigen::Matrix< ScalarType, Eigen::Dynamic, 1 > gamma( l_ );
 
-        for ( int iteration = 0; iteration < params_.max_iterations(); ++iteration )
+        for ( ; iteration < params_.max_iterations(); ++iteration )
         {
             sigma = -omega * sigma;
 
@@ -167,29 +187,26 @@ class PBiCGStab
 
             omega = gamma( l_ - 1 );
 
-            auto absolute_residual = std::sqrt( dot( residual(), residual(), level ) );
+            absolute_residual = std::sqrt( dot( residual(), residual(), level ) );
 
-            const ScalarType relative_residual = absolute_residual / initial_residual;
+            relative_residual = absolute_residual / initial_residual;
 
-            if ( statistics.has_value() )
-            {
-                statistics->get().add_row(
-                    { { "tag", tag_ },
-                      { "iteration", iteration },
-                      { "relative_residual", relative_residual },
-                      { "absolute_residual", absolute_residual } } );
-            }
+            add_table_row( false );
 
             if ( relative_residual <= params_.relative_residual_tolerance() )
             {
+                add_table_row( true );
                 return;
             }
 
             if ( absolute_residual < params_.absolute_residual_tolerance() )
             {
+                add_table_row( true );
                 return;
             }
         }
+
+        add_table_row( true );
     }
 
   private:
