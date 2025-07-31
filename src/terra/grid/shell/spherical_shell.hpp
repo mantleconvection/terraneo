@@ -12,6 +12,10 @@ namespace terra::grid::shell {
 
 std::vector< double > uniform_shell_radii( double r_min, double r_max, int num_shells );
 
+/// @brief (Sortable) Identifier for a single subdomain of a diamond.
+///
+/// Carries the diamond ID, and the subdomain index (x, y, r) inside the diamond.
+/// Is globally unique (also in parallel settings).
 class SubdomainInfo
 {
   public:
@@ -29,9 +33,16 @@ class SubdomainInfo
     , subdomain_r_( subdomain_r )
     {}
 
+    /// @brief Diamond that subdomain is part of.
     int diamond_id() const { return diamond_id_; }
+
+    /// @brief Subdomain index in lateral x-direction (local to the diamond).
     int subdomain_x() const { return subdomain_x_; }
+
+    /// @brief Subdomain index in lateral y-direction (local to the diamond).
     int subdomain_y() const { return subdomain_y_; }
+
+    /// @brief Subdomain index in the radial direction (local to the diamond).
     int subdomain_r() const { return subdomain_r_; }
 
     bool operator<( const SubdomainInfo& other ) const
@@ -40,6 +51,7 @@ class SubdomainInfo
                std::tie( other.diamond_id_, other.subdomain_r_, other.subdomain_y_, other.subdomain_x_ );
     }
 
+    /// @brief Scrambles the four indices (diamond ID, x, y, r) into a single integer.
     int global_id() const
     {
         if ( diamond_id_ >= 10 )
@@ -75,11 +87,29 @@ inline std::ostream& operator<<( std::ostream& os, const SubdomainInfo& si )
     return os;
 }
 
+/// @brief Information about the domain/mesh.
+///
+/// This holds data such as the number of subdomains in each direction (on each diamond), as well as the refinement
+/// level and the locations of the radial layers.
+///
+/// Note that all subdomains always have the same number of cells in all directions.
+///
+/// It has no notion of parallel distribution. For that refer to the DistributedDomain class.
 class DomainInfo
 {
   public:
     DomainInfo() = default;
 
+    /// @brief Constructs a thick spherical shell with one subdomain per diamond (10 subdomains total) and uniformly
+    /// distributed shells.
+    ///
+    /// Note: a 'shell' is a spherical 2D manifold in 3D space (it is thin),
+    ///       a 'layer' is defined as the volume between two 'shells' (it is thick)
+    ///
+    /// @param global_lateral_refinement_level number of lateral diamond refinements
+    /// @param r_min inner radius
+    /// @param r_max outer radius
+    /// @param num_uniform_layers number of layers (uniformly spaced using r_min and r_max)
     DomainInfo( int global_lateral_refinement_level, double r_min, double r_max, int num_uniform_layers )
     : global_lateral_refinement_level_( global_lateral_refinement_level )
     , radii_( uniform_shell_radii( r_min, r_max, num_uniform_layers + 1 ) )
@@ -92,6 +122,19 @@ class DomainInfo
             throw std::invalid_argument(
                 "Number of layers must be divisible by number of subdomains in radial direction." );
         }
+    }
+
+    /// @brief The refinement level of the subdomains.
+    ///
+    /// This (non-negative) number is essentially indicating how many times a subdomain can be uniformly coarsened.
+    int subdomain_max_refinement_level() const
+    {
+        const auto max_refinement_level_lat =
+            std::countr_zero( static_cast< unsigned >( subdomain_num_nodes_per_side_laterally() - 1 ) );
+        const auto max_refinement_level_rad =
+            std::countr_zero( static_cast< unsigned >( subdomain_num_nodes_radially() - 1 ) );
+
+        return std::min( max_refinement_level_lat, max_refinement_level_rad );
     }
 
     int global_lateral_refinement_level() const { return global_lateral_refinement_level_; }
@@ -151,6 +194,10 @@ class DomainInfo
     int num_subdomains_in_radial_direction_;
 };
 
+/// @brief Neighborhood information of a single subdomain.
+///
+/// Holds information such as the MPI ranks of the neighboring subdomains, and their orientation.
+/// Required for communication (packing, unpacking, sending, receiving 'ghost-layer' data).
 class SubdomainNeighborhood
 {
   public:
@@ -296,11 +343,14 @@ class SubdomainNeighborhood
     std::map< BoundaryFace, NeighborSubdomainTupleFace >                    neighborhood_face_;
 };
 
+/// @brief Holds the DomainInfo plus the neighborhood information (SubdomainNeighborhood) for all process-local
+///        subdomains.
 class DistributedDomain
 {
   public:
     using LocalSubdomainIdx = int;
 
+    /// @brief Creates a Domain with a single subdomain per diamond and initializes all the subdomain neighborhoods.
     static DistributedDomain create_uniform_single_subdomain(
         const int    lateral_refinement_level,
         const int    radial_refinement_level,
@@ -365,8 +415,21 @@ inline Kokkos::MDRangePolicy< Kokkos::Rank< 4 > >
           distributed_domain.domain_info().subdomain_num_nodes_radially() - 1 } );
 }
 
+/// @brief Returns an initialized grid with the coordinates of all subdomains' nodes projected to the unit sphere.
+///
+/// The layout is
+///
+///     grid( local_subdomain_id, x_idx, y_idx, node_coord )
+///
+/// where node_coord is in {0, 1, 2} and refers to the cartesian coordinate of the point.
 Grid3DDataVec< double, 3 > subdomain_unit_sphere_single_shell_coords( const DistributedDomain& domain );
 
+/// @brief Returns an initialized grid with the radii of all subdomains' nodes.
+///
+/// The layout is
+///
+///     grid( local_subdomain_id, r_idx )
+///
 Grid2DDataScalar< double > subdomain_shell_radii( const DistributedDomain& domain );
 
 KOKKOS_INLINE_FUNCTION dense::Vec< double, 3 > coords(
