@@ -437,14 +437,118 @@ KOKKOS_INLINE_FUNCTION void atomically_add_local_wedge_vector_coefficients(
         &global_coefficients( local_subdomain_id, x_cell + 1, y_cell + 1, r_cell + 1, d ), local_coefficients[1]( 3 ) );
 }
 
+/// @brief Returns the lateral wedge index with respect to a coarse grid wedge from the fine wedge indices.
+///
+/// Each coarse grid wedge is laterally divided into four fine wedges (radially into two).
+/// The lateral four fine wedges are enumerated from 0 to 3.
+///
+/// This function returns that lateral index given a fine grid index of a wedge.
+///
+/// Here are two coarse wedges (view from the "top"), each with four fine grid wedges (enumerated from 0 to 3).
+///
+/// @code
+///
+/// Coarse wedge idx = 0
+///
+/// +
+/// |\
+/// | \
+/// |  \
+/// | 2 \
+/// +----+
+/// |\ 3 |\
+/// | \  | \
+/// |  \ |  \
+/// | 0 \| 1 \
+/// +----+----+
+///
+/// Coarse wedge idx = 1
+///
+/// +----+----+
+///  \ 1 |\ 0 |
+///   \  | \  |
+///    \ |  \ |
+///     \| 3 \|
+///      +----+
+///       \ 2 |
+///        \  |
+///         \ |
+///          \|
+///           +
+///
+/// @endcode
+///
+/// This function now computes the indices from a grid of fine wedges that looks like this:
+///
+/// @code
+///
+/// x_cell_fine % 1:
+///
+/// +----+----+
+/// |\ 0 |\ 1 |
+/// | \  | \  |
+/// |  \ |  \ |
+/// | 0 \| 1 \|
+/// +----+----+
+/// |\ 0 |\ 1 |
+/// | \  | \  |
+/// |  \ |  \ |
+/// | 0 \| 1 \|
+/// +----+----+
+///
+/// y_cell_fine % 1:
+///
+/// +----+----+
+/// |\ 1 |\ 1 |
+/// | \  | \  |
+/// |  \ |  \ |
+/// | 1 \| 1 \|
+/// +----+----+
+/// |\ 0 |\ 0 |
+/// | \  | \  |
+/// |  \ |  \ |
+/// | 0 \| 0 \|
+/// +----+----+
+///
+/// wedge_idx_fine:
+///
+/// +----+----+
+/// |\ 1 |\ 1 |
+/// | \  | \  |
+/// |  \ |  \ |
+/// | 0 \| 0 \|
+/// +----+----+
+/// |\ 1 |\ 1 |
+/// | \  | \  |
+/// |  \ |  \ |
+/// | 0 \| 0 \|
+/// +----+----+
+///
+/// Resulting/returned values:
+///
+/// +----+----+
+/// |\ 1 |\ 0 |
+/// | \  | \  |
+/// |  \ |  \ |
+/// | 2 \| 3 \|
+/// +----+----+
+/// |\ 3 |\ 2 |
+/// | \  | \  |
+/// |  \ |  \ |
+/// | 0 \| 1 \|
+/// +----+----+
+///
+/// @endcode
+///
+///
 KOKKOS_INLINE_FUNCTION
-constexpr int fine_lateral_wedge_idx( const int x_cell, const int y_cell, const int wedge_idx )
+constexpr int fine_lateral_wedge_idx( const int x_cell_fine, const int y_cell_fine, const int wedge_idx_fine )
 {
     // wedge, y, x
     constexpr int indices[2][2][2] = { { { 0, 1 }, { 2, 3 } }, { { 3, 2 }, { 1, 0 } } };
-    const int     x_mod            = x_cell % 2;
-    const int     y_mod            = y_cell % 2;
-    return indices[wedge_idx][y_mod][x_mod];
+    const int     x_mod            = x_cell_fine % 2;
+    const int     y_mod            = y_cell_fine % 2;
+    return indices[wedge_idx_fine][y_mod][x_mod];
 }
 
 } // namespace terra::fe::wedge

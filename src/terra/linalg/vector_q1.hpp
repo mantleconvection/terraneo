@@ -132,6 +132,13 @@ class VectorQ1Scalar
             distributed_domain.domain_info().subdomain_num_nodes_radially() );
 
         grid_data_ = grid_data;
+
+        if ( mask_data_.extent( 0 ) != grid_data_.extent( 0 ) || mask_data_.extent( 1 ) != grid_data_.extent( 1 ) ||
+             mask_data_.extent( 2 ) != grid_data_.extent( 2 ) || mask_data_.extent( 3 ) != grid_data_.extent( 3 ) )
+        {
+            throw std::runtime_error(
+                "VectorQ1Scalar::VectorQ1Scalar: mask_data and grid_data must have the same size" );
+        }
     }
 
     void lincomb_impl( const std::vector< ScalarType >& c, const std::vector< VectorQ1Scalar >& x, const ScalarType c0 )
@@ -214,6 +221,13 @@ class VectorQ1Vec
             distributed_domain.domain_info().subdomain_num_nodes_radially() );
 
         grid_data_ = grid_data;
+
+        if ( mask_data_.extent( 0 ) != grid_data_.extent( 0 ) || mask_data_.extent( 1 ) != grid_data_.extent( 1 ) ||
+             mask_data_.extent( 2 ) != grid_data_.extent( 2 ) || mask_data_.extent( 3 ) != grid_data_.extent( 3 ) )
+        {
+            throw std::runtime_error(
+                "VectorQ1Scalar::VectorQ1Scalar: mask_data and grid_data must have the same size" );
+        }
     }
 
     using ScalarType     = ScalarT;

@@ -322,8 +322,8 @@ std::pair< double, double > test( int level, const std::shared_ptr< util::Table 
 
     linalg::apply( K, w, tmp_6 );
     linalg::lincomb( r, { 1.0, -1.0 }, { b, tmp_6 } );
-    const auto inf_residual_vel = linalg::inf_norm( r.block_1() );
-    const auto inf_residual_pre = linalg::inf_norm( r.block_2() );
+    const auto inf_residual_vel = linalg::norm_inf( r.block_1() );
+    const auto inf_residual_pre = linalg::norm_inf( r.block_2() );
 
     linalg::lincomb( error, { 1.0, -1.0 }, { w, solution } );
     const auto l2_error_velocity =

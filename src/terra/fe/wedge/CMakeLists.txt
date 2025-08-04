@@ -3,3 +3,4 @@ target_sources(terra
         integrands.hpp)
 
 add_subdirectory(operators)
+add_subdirectory(shell)

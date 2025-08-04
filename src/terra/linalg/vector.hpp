@@ -92,9 +92,16 @@ void randomize( Vector& y )
 }
 
 template < VectorLike Vector >
-ScalarOf< Vector > inf_norm( const Vector& y )
+ScalarOf< Vector > norm_inf( const Vector& y )
 {
     return y.max_abs_entry_impl();
+}
+
+template < VectorLike Vector >
+ScalarOf< Vector > norm_2_scaled( const Vector& y, const ScalarOf< Vector >& scaling_factor_under_the_root )
+{
+    const auto dot_prod = dot( y, y );
+    return std::sqrt( dot_prod * scaling_factor_under_the_root );
 }
 
 template < VectorLike Vector >

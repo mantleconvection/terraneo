@@ -112,29 +112,6 @@ struct SetOnBoundary
 
 double test( int level, const std::shared_ptr< util::Table >& table )
 {
-    /**
-
-    Boundary handling notes.
-
-    Using inhom boundary conditions we approach the elimination as follows (for the moment).
-
-    Let A be the "Neumann" operator, i.e., we do not treat the boundaries any differently.
-
-    1. Interpolate Dirichlet boundary conditions into g.
-    2. Compute g_A <- A       * g.
-    3. Compute g_D <- diag(A) * g.
-    4. Set the rhs to b = f - g_A.
-    5. Set the rhs at the boundary nodes to g_D.
-    6. Solve
-            A_elim x = b
-       where A_elim is A but with all off-diagonal entries in the same row/col as a boundary node set to zero.
-       In a matrix-free context, we have to adapt the element matrix A_local accordingly by (symmetrically) zeroing
-       out all the off-diagonals (row and col) that correspond to a boundary node. But we keep the diagonal intact.
-       We still have diag(A) == diag(A_elim).
-    7. x is the solution of the original problem. No boundary correction should be necessary.
-
-    **/
-
     Kokkos::Timer timer;
 
     using ScalarType = double;
@@ -152,8 +129,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
     VectorQ1Scalar< ScalarType > b( "b", domain, mask_data );
     VectorQ1Scalar< ScalarType > r( "r", domain, mask_data );
 
-    linalg::assign( tmp, 1.0 );
-    const auto num_dofs = linalg::dot( tmp, tmp );
+    const auto num_dofs = kernels::common::count_masked< long >( mask_data, grid::mask_owned() );
 
     const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
     const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
