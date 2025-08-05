@@ -16,7 +16,7 @@
 namespace terra::fe::wedge::operators::shell {
 
 template < typename ScalarT >
-class Prolongation
+class Restriction
 {
   public:
     using SrcVectorType = linalg::VectorQ1Scalar< double >;
@@ -24,11 +24,23 @@ class Prolongation
     using ScalarType    = ScalarT;
 
   private:
+    grid::shell::DistributedDomain domain_coarse_;
+
+    communication::shell::SubdomainNeighborhoodSendBuffer< double > send_buffers_;
+    communication::shell::SubdomainNeighborhoodRecvBuffer< double > recv_buffers_;
+
     grid::Grid4DDataScalar< ScalarType > src_;
     grid::Grid4DDataScalar< ScalarType > dst_;
 
+    grid::Grid4DDataScalar< util::MaskType > mask_src_;
+
   public:
-    Prolongation() {}
+    Restriction( const grid::shell::DistributedDomain& domain_coarse )
+    : domain_coarse_( domain_coarse )
+    // TODO: we can reuse the send and recv buffers and pass in from the outside somehow
+    , send_buffers_( domain_coarse )
+    , recv_buffers_( domain_coarse )
+    {}
 
     void apply_impl(
         const SrcVectorType&                    src,
@@ -41,19 +53,20 @@ class Prolongation
             assign( dst, 0 );
         }
 
-        src_ = src.grid_data();
-        dst_ = dst.grid_data();
+        src_      = src.grid_data();
+        dst_      = dst.grid_data();
+        mask_src_ = src.mask_data();
 
         if ( src_.extent( 0 ) != dst_.extent( 0 ) )
         {
-            throw std::runtime_error( "Prolongation: src and dst must have the same number of subdomains." );
+            throw std::runtime_error( "Restriction: src and dst must have the same number of subdomains." );
         }
 
         for ( int i = 1; i <= 3; i++ )
         {
-            if ( 2 * ( src_.extent( i ) - 1 ) != dst_.extent( i ) - 1 )
+            if ( src_.extent( i ) - 1 != 2 * ( dst_.extent( i ) - 1 ) )
             {
-                throw std::runtime_error( "Prolongation: src and dst must have a compatible number of cells." );
+                throw std::runtime_error( "Restriction: src and dst must have a compatible number of cells." );
             }
         }
 
@@ -63,14 +76,24 @@ class Prolongation
             Kokkos::MDRangePolicy< Kokkos::Rank< 4 > >(
                 { 0, 0, 0, 0 },
                 {
-                    src_.extent( 0 ),
-                    src_.extent( 1 ),
-                    src_.extent( 2 ),
-                    src_.extent( 3 ),
+                    dst_.extent( 0 ),
+                    dst_.extent( 1 ),
+                    dst_.extent( 2 ),
+                    dst_.extent( 3 ),
                 } ),
             *this );
 
         Kokkos::fence();
+
+        // Additive communication.
+
+        std::vector< std::array< int, 11 > > expected_recvs_metadata;
+        std::vector< MPI_Request >           expected_recvs_requests;
+
+        communication::shell::pack_and_send_local_subdomain_boundaries(
+            domain_coarse_, dst_, send_buffers_, expected_recvs_requests, expected_recvs_metadata );
+        communication::shell::recv_unpack_and_add_local_subdomain_boundaries(
+            domain_coarse_, dst_, recv_buffers_, expected_recvs_requests, expected_recvs_metadata );
     }
 
     KOKKOS_INLINE_FUNCTION void
@@ -89,15 +112,22 @@ class Prolongation
             const auto fine_stencil_y = y_fine + offset( 1 );
             const auto fine_stencil_r = r_fine + offset( 2 );
 
-            if ( fine_stencil_x >= 0 && fine_stencil_x < dst_.extent( 1 ) && fine_stencil_y >= 0 &&
-                 fine_stencil_y < dst_.extent( 2 ) && fine_stencil_r >= 0 && fine_stencil_r < dst_.extent( 3 ) )
+            if ( fine_stencil_x >= 0 && fine_stencil_x < src_.extent( 1 ) && fine_stencil_y >= 0 &&
+                 fine_stencil_y < src_.extent( 2 ) && fine_stencil_r >= 0 && fine_stencil_r < src_.extent( 3 ) )
             {
                 const auto weight = wedge::shell::prolongation_weight< ScalarType >(
                     fine_stencil_x, fine_stencil_y, fine_stencil_r, x_coarse, y_coarse, r_coarse );
 
+                const auto mask_weight =
+                    util::check_bits(
+                        mask_src_( local_subdomain_id, fine_stencil_x, fine_stencil_y, fine_stencil_r ),
+                        grid::mask_owned() ) ?
+                        1.0 :
+                        0.0;
+
                 Kokkos::atomic_add(
-                    &dst_( local_subdomain_id, fine_stencil_x, fine_stencil_y, fine_stencil_r ),
-                    weight * src_( local_subdomain_id, x_coarse, y_coarse, r_coarse ) );
+                    &dst_( local_subdomain_id, x_coarse, y_coarse, r_coarse ),
+                    weight * mask_weight * src_( local_subdomain_id, fine_stencil_x, fine_stencil_y, fine_stencil_r ) );
             }
         }
     }

@@ -7,9 +7,11 @@
 #include "fe/wedge/operators/shell/laplace_simple.hpp"
 #include "linalg/solvers/pcg.hpp"
 #include "linalg/solvers/richardson.hpp"
+#include "linalg/util/debug_sparse_assembly.hpp"
 #include "terra/dense/mat.hpp"
 #include "terra/fe/wedge/operators/shell/mass.hpp"
 #include "terra/fe/wedge/operators/shell/prolongation.hpp"
+#include "terra/fe/wedge/operators/shell/restriction.hpp"
 #include "terra/grid/grid_types.hpp"
 #include "terra/grid/shell/spherical_shell.hpp"
 #include "terra/kernels/common/grid_operations.hpp"
@@ -91,8 +93,7 @@ struct SomeFunctionInterpolator
     }
 };
 
-template < typename FunctionInterpolator >
-double test( int level, const std::shared_ptr< util::Table >& table )
+void test( int level, const std::shared_ptr< util::Table >& table )
 {
     using ScalarType = double;
 
@@ -108,8 +109,8 @@ double test( int level, const std::shared_ptr< util::Table >& table )
     auto mask_data_coarse = linalg::setup_mask_data( domain_coarse );
 
     VectorQ1Scalar< ScalarType > u_coarse( "u_coarse", domain_coarse, mask_data_coarse );
-
     VectorQ1Scalar< ScalarType > u_fine( "u_fine", domain_fine, mask_data_fine );
+
     VectorQ1Scalar< ScalarType > solution_fine( "solution_fine", domain_fine, mask_data_fine );
     VectorQ1Scalar< ScalarType > error_fine( "error_fine", domain_fine, mask_data_fine );
 
@@ -122,56 +123,34 @@ double test( int level, const std::shared_ptr< util::Table >& table )
     const auto subdomain_radii_coarse = terra::grid::shell::subdomain_shell_radii( domain_coarse );
 
     using Prolongation = fe::wedge::operators::shell::Prolongation< ScalarType >;
+    using Restriction  = fe::wedge::operators::shell::Restriction< ScalarType >;
 
     Prolongation P;
+    Restriction  R( domain_coarse );
 
-    // Set up solution data.
-    Kokkos::parallel_for(
-        "coarse interpolation",
-        local_domain_md_range_policy_nodes( domain_coarse ),
-        FunctionInterpolator( subdomain_shell_coords_coarse, subdomain_radii_coarse, u_coarse.grid_data(), false ) );
+    Eigen::SparseMatrix< double > P_assembled =
+        linalg::util::debug_sparse_assembly_operator_vec_q1_scalar( domain_coarse, P, u_coarse, u_fine );
 
-    Kokkos::fence();
+    Eigen::SparseMatrix< double > R_assembled =
+        linalg::util::debug_sparse_assembly_operator_vec_q1_scalar( domain_fine, R, u_fine, u_coarse );
 
-    Kokkos::parallel_for(
-        "fine solution interpolation",
-        local_domain_md_range_policy_nodes( domain_fine ),
-        FunctionInterpolator( subdomain_shell_coords_fine, subdomain_radii_fine, solution_fine.grid_data(), false ) );
+    std::cout << P_assembled.toDense() << std::endl;
+    std::cout << std::endl;
+    std::cout << R_assembled.toDense() << std::endl;
+    std::cout << std::endl;
 
-    Kokkos::fence();
+    Eigen::Matrix< double, Eigen::Dynamic, Eigen::Dynamic > error =
+        P_assembled.toDense() - R_assembled.transpose().toDense();
 
-    linalg::apply( P, u_coarse, u_fine );
+    std::cout << error << std::endl;
 
-    linalg::lincomb( error_fine, { 1.0, -1.0 }, { u_fine, solution_fine } );
+    const auto error_norm = error.norm();
+    std::cout << "error norm: " << error_norm << std::endl;
 
-    const auto num_dofs = kernels::common::count_masked< long >( mask_data_fine, grid::mask_owned() );
-
-    const auto error_norm = linalg::norm_2_scaled( error_fine, 1.0 / num_dofs );
-
-    if ( true )
+    if ( error_norm > 1e-15 )
     {
-        vtk::VTKOutput vtk_fine(
-            subdomain_shell_coords_fine,
-            subdomain_radii_fine,
-            "prolongation_fine_level_" + std::to_string( level ) + ".vtu",
-            false );
-        vtk_fine.add_scalar_field( u_fine.grid_data() );
-        vtk_fine.add_scalar_field( solution_fine.grid_data() );
-        vtk_fine.add_scalar_field( error_fine.grid_data() );
-
-        vtk_fine.write();
-
-        vtk::VTKOutput vtk_coarse(
-            subdomain_shell_coords_coarse,
-            subdomain_radii_coarse,
-            "prolongation_coarse_level_" + std::to_string( level ) + ".vtu",
-            false );
-        vtk_coarse.add_scalar_field( u_coarse.grid_data() );
-
-        vtk_coarse.write();
+        throw std::runtime_error( "error is not zero" );
     }
-
-    return error_norm;
 }
 
 int main( int argc, char** argv )
@@ -180,41 +159,7 @@ int main( int argc, char** argv )
 
     auto table = std::make_shared< util::Table >();
 
-    std::cout << "Testing prolongation: constant function" << std::endl;
-    {
-        for ( int level = 1; level <= 5; ++level )
-        {
-            double error = test< ConstantFunctionInterpolator >( level, table );
-
-            std::cout << "error (fine level " << level << ") = " << error << std::endl;
-
-            if ( error > 1e-12 )
-            {
-                throw std::runtime_error( "constants must be prolongated exactly" );
-            }
-        }
-    }
-
-    std::cout << std::endl;
-
-    std::cout << "Testing prolongation: arbitrary function" << std::endl;
-    {
-        double prev_error = 1.0;
-        for ( int level = 1; level <= 5; ++level )
-        {
-            double error = test< SomeFunctionInterpolator >( level, table );
-            if ( level > 2 )
-            {
-                const auto order = prev_error / error;
-                std::cout << "order (fine level " << level << ") = " << order << std::endl;
-                if ( order < 3.8 )
-                {
-                    throw std::runtime_error( "order too low" );
-                }
-            }
-            prev_error = error;
-        }
-    }
+    test( 1, table );
 
     return 0;
 }

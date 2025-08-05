@@ -3,3 +3,4 @@ target_sources(terra
         operator.hpp)
 
 add_subdirectory(solvers)
+add_subdirectory(util)

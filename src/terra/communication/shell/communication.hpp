@@ -283,7 +283,8 @@ struct RecvRequestBoundaryInfo
 enum class CommuncationReduction
 {
     SUM,
-    MIN
+    MIN,
+    MAX,
 };
 
 /// @brief Posts metadata receives, packs data into send buffers, sends data to neighboring subdomains.
@@ -536,6 +537,27 @@ void pack_and_send_local_subdomain_boundaries(
     }
 }
 
+namespace detail {
+
+template < typename T >
+KOKKOS_INLINE_FUNCTION void reduction_function( T* ptr, const T& val, const CommuncationReduction reduction_type )
+{
+    if ( reduction_type == CommuncationReduction::SUM )
+    {
+        Kokkos::atomic_add( ptr, val );
+    }
+    else if ( reduction_type == CommuncationReduction::MIN )
+    {
+        Kokkos::atomic_min( ptr, val );
+    }
+    else if ( reduction_type == CommuncationReduction::MAX )
+    {
+        Kokkos::atomic_max( ptr, val );
+    }
+}
+
+} // namespace detail
+
 /// @brief Waits for metadata packets, then waits for corresponding boundary data, unpacks and adds the data.
 template < typename GridDataType >
 void recv_unpack_and_add_local_subdomain_boundaries(
@@ -635,16 +657,8 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                     "add_boundary_edge_" + to_string( receiver_boundary_edge ),
                                     Kokkos::RangePolicy( 0, recv_buffer.extent( 0 ) ),
                                     KOKKOS_LAMBDA( const int idx ) {
-                                        if ( reduction == CommuncationReduction::SUM )
-                                        {
-                                            Kokkos::atomic_add(
-                                                &data( local_subdomain_id, 0, 0, idx ), recv_buffer( idx, 0 ) );
-                                        }
-                                        else if ( reduction == CommuncationReduction::MIN )
-                                        {
-                                            Kokkos::atomic_min(
-                                                &data( local_subdomain_id, 0, 0, idx ), recv_buffer( idx, 0 ) );
-                                        }
+                                        detail::reduction_function(
+                                            &data( local_subdomain_id, 0, 0, idx ), recv_buffer( idx, 0 ), reduction );
                                     } );
                             }
                             else
@@ -654,16 +668,10 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                     Kokkos::MDRangePolicy(
                                         { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
                                     KOKKOS_LAMBDA( const int idx, const int d ) {
-                                        if ( reduction == CommuncationReduction::SUM )
-                                        {
-                                            Kokkos::atomic_add(
-                                                &data( local_subdomain_id, 0, 0, idx, d ), recv_buffer( idx, d ) );
-                                        }
-                                        else if ( reduction == CommuncationReduction::MIN )
-                                        {
-                                            Kokkos::atomic_min(
-                                                &data( local_subdomain_id, 0, 0, idx, d ), recv_buffer( idx, d ) );
-                                        }
+                                        detail::reduction_function(
+                                            &data( local_subdomain_id, 0, 0, idx, d ),
+                                            recv_buffer( idx, d ),
+                                            reduction );
                                     } );
                             }
 
@@ -710,18 +718,10 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                     Kokkos::MDRangePolicy(
                                         { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
                                     KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
-                                        if ( reduction == CommuncationReduction::SUM )
-                                        {
-                                            Kokkos::atomic_add(
-                                                &data( local_subdomain_id, 0, idx_i, idx_j ),
-                                                recv_buffer( idx_i, idx_j, 0 ) );
-                                        }
-                                        else if ( reduction == CommuncationReduction::MIN )
-                                        {
-                                            Kokkos::atomic_min(
-                                                &data( local_subdomain_id, 0, idx_i, idx_j ),
-                                                recv_buffer( idx_i, idx_j, 0 ) );
-                                        }
+                                        detail::reduction_function(
+                                            &data( local_subdomain_id, 0, idx_i, idx_j ),
+                                            recv_buffer( idx_i, idx_j, 0 ),
+                                            reduction );
                                     } );
                             }
                             else
@@ -732,18 +732,10 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                         { 0, 0, 0 },
                                         { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ), recv_buffer.extent( 2 ) } ),
                                     KOKKOS_LAMBDA( const int idx_i, const int idx_j, const int d ) {
-                                        if ( reduction == CommuncationReduction::SUM )
-                                        {
-                                            Kokkos::atomic_add(
-                                                &data( local_subdomain_id, 0, idx_i, idx_j, d ),
-                                                recv_buffer( idx_i, idx_j, d ) );
-                                        }
-                                        else if ( reduction == CommuncationReduction::MIN )
-                                        {
-                                            Kokkos::atomic_min(
-                                                &data( local_subdomain_id, 0, idx_i, idx_j, d ),
-                                                recv_buffer( idx_i, idx_j, d ) );
-                                        }
+                                        detail::reduction_function(
+                                            &data( local_subdomain_id, 0, idx_i, idx_j, d ),
+                                            recv_buffer( idx_i, idx_j, d ),
+                                            reduction );
                                     } );
                             }
 
@@ -757,18 +749,10 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                     Kokkos::MDRangePolicy(
                                         { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
                                     KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
-                                        if ( reduction == CommuncationReduction::SUM )
-                                        {
-                                            Kokkos::atomic_add(
-                                                &data( local_subdomain_id, idx_i, 0, idx_j ),
-                                                recv_buffer( idx_i, idx_j, 0 ) );
-                                        }
-                                        else if ( reduction == CommuncationReduction::MIN )
-                                        {
-                                            Kokkos::atomic_min(
-                                                &data( local_subdomain_id, idx_i, 0, idx_j ),
-                                                recv_buffer( idx_i, idx_j, 0 ) );
-                                        }
+                                        detail::reduction_function(
+                                            &data( local_subdomain_id, idx_i, 0, idx_j ),
+                                            recv_buffer( idx_i, idx_j, 0 ),
+                                            reduction );
                                     } );
                             }
                             else
@@ -779,18 +763,10 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                         { 0, 0, 0 },
                                         { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ), recv_buffer.extent( 2 ) } ),
                                     KOKKOS_LAMBDA( const int idx_i, const int idx_j, const int d ) {
-                                        if ( reduction == CommuncationReduction::SUM )
-                                        {
-                                            Kokkos::atomic_add(
-                                                &data( local_subdomain_id, idx_i, 0, idx_j, d ),
-                                                recv_buffer( idx_i, idx_j, d ) );
-                                        }
-                                        else if ( reduction == CommuncationReduction::MIN )
-                                        {
-                                            Kokkos::atomic_min(
-                                                &data( local_subdomain_id, idx_i, 0, idx_j, d ),
-                                                recv_buffer( idx_i, idx_j, d ) );
-                                        }
+                                        detail::reduction_function(
+                                            &data( local_subdomain_id, idx_i, 0, idx_j, d ),
+                                            recv_buffer( idx_i, idx_j, d ),
+                                            reduction );
                                     } );
                             }
 
@@ -804,18 +780,10 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                     Kokkos::MDRangePolicy(
                                         { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
                                     KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
-                                        if ( reduction == CommuncationReduction::SUM )
-                                        {
-                                            Kokkos::atomic_add(
-                                                &data( local_subdomain_id, data.extent( 1 ) - 1, idx_i, idx_j ),
-                                                recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, 0 ) );
-                                        }
-                                        else if ( reduction == CommuncationReduction::MIN )
-                                        {
-                                            Kokkos::atomic_min(
-                                                &data( local_subdomain_id, data.extent( 1 ) - 1, idx_i, idx_j ),
-                                                recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, 0 ) );
-                                        }
+                                        detail::reduction_function(
+                                            &data( local_subdomain_id, data.extent( 1 ) - 1, idx_i, idx_j ),
+                                            recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, 0 ),
+                                            reduction );
                                     } );
                             }
                             else
@@ -826,18 +794,10 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                         { 0, 0, 0 },
                                         { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ), recv_buffer.extent( 2 ) } ),
                                     KOKKOS_LAMBDA( const int idx_i, const int idx_j, const int d ) {
-                                        if ( reduction == CommuncationReduction::SUM )
-                                        {
-                                            Kokkos::atomic_add(
-                                                &data( local_subdomain_id, data.extent( 1 ) - 1, idx_i, idx_j, d ),
-                                                recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, d ) );
-                                        }
-                                        else if ( reduction == CommuncationReduction::MIN )
-                                        {
-                                            Kokkos::atomic_min(
-                                                &data( local_subdomain_id, data.extent( 1 ) - 1, idx_i, idx_j, d ),
-                                                recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, d ) );
-                                        }
+                                        detail::reduction_function(
+                                            &data( local_subdomain_id, data.extent( 1 ) - 1, idx_i, idx_j, d ),
+                                            recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, d ),
+                                            reduction );
                                     } );
                             }
 
@@ -850,18 +810,10 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                     Kokkos::MDRangePolicy(
                                         { 0, 0 }, { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ) } ),
                                     KOKKOS_LAMBDA( const int idx_i, const int idx_j ) {
-                                        if ( reduction == CommuncationReduction::SUM )
-                                        {
-                                            Kokkos::atomic_add(
-                                                &data( local_subdomain_id, idx_i, data.extent( 2 ) - 1, idx_j ),
-                                                recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, 0 ) );
-                                        }
-                                        else if ( reduction == CommuncationReduction::MIN )
-                                        {
-                                            Kokkos::atomic_min(
-                                                &data( local_subdomain_id, idx_i, data.extent( 2 ) - 1, idx_j ),
-                                                recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, 0 ) );
-                                        }
+                                        detail::reduction_function(
+                                            &data( local_subdomain_id, idx_i, data.extent( 2 ) - 1, idx_j ),
+                                            recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, 0 ),
+                                            reduction );
                                     } );
                             }
                             else
@@ -872,18 +824,10 @@ void recv_unpack_and_add_local_subdomain_boundaries(
                                         { 0, 0, 0 },
                                         { recv_buffer.extent( 0 ), recv_buffer.extent( 1 ), recv_buffer.extent( 2 ) } ),
                                     KOKKOS_LAMBDA( const int idx_i, const int idx_j, const int d ) {
-                                        if ( reduction == CommuncationReduction::SUM )
-                                        {
-                                            Kokkos::atomic_add(
-                                                &data( local_subdomain_id, idx_i, data.extent( 2 ) - 1, idx_j, d ),
-                                                recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, d ) );
-                                        }
-                                        else if ( reduction == CommuncationReduction::MIN )
-                                        {
-                                            Kokkos::atomic_min(
-                                                &data( local_subdomain_id, idx_i, data.extent( 2 ) - 1, idx_j, d ),
-                                                recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, d ) );
-                                        }
+                                        detail::reduction_function(
+                                            &data( local_subdomain_id, idx_i, data.extent( 2 ) - 1, idx_j, d ),
+                                            recv_buffer( recv_buffer.extent( 0 ) - 1 - idx_i, idx_j, d ),
+                                            reduction );
                                     } );
                             }
 
