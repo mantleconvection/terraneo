@@ -406,6 +406,8 @@ class SubdomainNeighborhood
 class DistributedDomain
 {
   public:
+    DistributedDomain() = default;
+
     using LocalSubdomainIdx = int;
 
     /// @brief Creates a Domain with a single subdomain per diamond and initializes all the subdomain neighborhoods.
@@ -433,8 +435,6 @@ class DistributedDomain
     }
 
   private:
-    DistributedDomain() = default;
-
     DomainInfo                                                                        domain_info_;
     std::map< SubdomainInfo, std::tuple< LocalSubdomainIdx, SubdomainNeighborhood > > subdomains_;
 };
