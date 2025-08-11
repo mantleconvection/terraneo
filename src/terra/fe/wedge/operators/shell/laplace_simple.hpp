@@ -71,6 +71,17 @@ class LaplaceSimple
         src_ = src.grid_data();
         dst_ = dst.grid_data();
 
+        if ( src_.extent( 0 ) != dst_.extent( 0 ) || src_.extent( 1 ) != dst_.extent( 1 ) ||
+             src_.extent( 2 ) != dst_.extent( 2 ) || src_.extent( 3 ) != dst_.extent( 3 ) )
+        {
+            throw std::runtime_error( "LaplaceSimple: src/dst mismatch" );
+        }
+
+        if ( src_.extent( 1 ) != grid_.extent( 1 ) || src_.extent( 2 ) != grid_.extent( 2 ) )
+        {
+            throw std::runtime_error( "LaplaceSimple: src/dst mismatch" );
+        }
+
         Kokkos::parallel_for( "matvec", grid::shell::local_domain_md_range_policy_cells( domain_ ), *this );
 
         if ( operator_communication_mode_ == linalg::OperatorCommunicationMode::CommunicateAdditively )
@@ -97,13 +108,13 @@ class LaplaceSimple
         const double r_2 = radii_( local_subdomain_id, r_cell + 1 );
 
         // Quadrature points.
-        constexpr auto num_quad_points = quadrature::quad_felippa_1x1_num_quad_points;
+        constexpr auto num_quad_points = quadrature::quad_felippa_3x2_num_quad_points;
 
         dense::Vec< double, 3 > quad_points[num_quad_points];
         double                  quad_weights[num_quad_points];
 
-        quadrature::quad_felippa_1x1_quad_points( quad_points );
-        quadrature::quad_felippa_1x1_quad_weights( quad_weights );
+        quadrature::quad_felippa_3x2_quad_points( quad_points );
+        quadrature::quad_felippa_3x2_quad_weights( quad_weights );
 
         // Compute the local element matrix.
         dense::Mat< double, 6, 6 > A[num_wedges_per_hex_cell] = {};
@@ -191,6 +202,6 @@ class LaplaceSimple
     }
 };
 
-static_assert( linalg::OperatorLike< Laplace< double > > );
+static_assert( linalg::OperatorLike< LaplaceSimple< double > > );
 
 } // namespace terra::fe::wedge::operators::shell
