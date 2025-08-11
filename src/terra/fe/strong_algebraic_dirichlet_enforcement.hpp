@@ -61,4 +61,17 @@ void strong_algebraic_dirichlet_enforcement_poisson_like(
     kernels::common::assign_masked_else_keep_old( b.grid_data(), tmp.grid_data(), mask_data, dirichlet_boundary_mask );
 }
 
+/// @brief Same as strong_algebraic_dirichlet_enforcement_poisson_like() for homogenous boundary conditions (g = 0).
+///
+/// Does not require most of the steps since g = g_A = g_D = 0. Still requires solving A_elim x = b_elim after this.
+template < typename ScalarType >
+void strong_algebraic_homogeneous_dirichlet_enforcement_poisson_like(
+    linalg::VectorQ1Scalar< ScalarType >&           b,
+    const grid::Grid4DDataScalar< util::MaskType >& mask_data,
+    const util::MaskAndValue&                       dirichlet_boundary_mask )
+{
+    // b_elim <- 0 on the Dirichlet boundary
+    kernels::common::assign_masked_else_keep_old( b.grid_data(), 0.0, mask_data, dirichlet_boundary_mask );
+}
+
 } // namespace terra::fe
