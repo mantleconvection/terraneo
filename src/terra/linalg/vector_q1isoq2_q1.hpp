@@ -24,14 +24,13 @@ class VectorQ1IsoQ2Q1
         const grid::shell::DistributedDomain&           distributed_domain_fine,
         const grid::shell::DistributedDomain&           distributed_domain_coarse,
         const grid::Grid4DDataScalar< util::MaskType >& mask_data_fine,
-        const grid::Grid4DDataScalar< util::MaskType >& mask_data_coarse)
-    : u_( label + "_u", distributed_domain_fine, mask_data_fine ), p_( label + "_p", distributed_domain_coarse, mask_data_coarse )
+        const grid::Grid4DDataScalar< util::MaskType >& mask_data_coarse )
+    : u_( label + "_u", distributed_domain_fine, mask_data_fine )
+    , p_( label + "_p", distributed_domain_coarse, mask_data_coarse )
     {}
 
-    void lincomb_impl(
-        const std::vector< ScalarType >&      c,
-        const std::vector< VectorQ1IsoQ2Q1 >& x,
-        const ScalarType                      c0 )
+    void
+        lincomb_impl( const std::vector< ScalarType >& c, const std::vector< VectorQ1IsoQ2Q1 >& x, const ScalarType c0 )
     {
         std::vector< Block1Type > us;
         std::vector< Block2Type > ps;
@@ -51,6 +50,18 @@ class VectorQ1IsoQ2Q1
         return x.block_1().dot_impl( u_ ) + x.block_2().dot_impl( p_ );
     }
 
+    void invert_entries_impl()
+    {
+        block_1().invert_entries_impl();
+        block_2().invert_entries_impl();
+    }
+
+    void scale_with_vector_impl( const VectorQ1IsoQ2Q1& x )
+    {
+        block_1().scale_with_vector_impl( x.block_1() );
+        block_2().scale_with_vector_impl( x.block_2() );
+    }
+
     void randomize_impl()
     {
         block_1().randomize_impl();
@@ -62,10 +73,7 @@ class VectorQ1IsoQ2Q1
         return std::max( block_1().max_abs_entry_impl(), block_2().max_abs_entry_impl() );
     }
 
-    bool has_nan_impl() const
-    {
-        return block_1().has_nan_impl() || block_2().has_nan_impl();
-    }
+    bool has_nan_impl() const { return block_1().has_nan_impl() || block_2().has_nan_impl(); }
 
     void swap_impl( VectorQ1IsoQ2Q1& other )
     {

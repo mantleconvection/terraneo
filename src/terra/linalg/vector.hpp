@@ -15,11 +15,15 @@ concept VectorLike = requires(
     // Requires exposing the scalar type.
     typename T::ScalarType;
 
-    // Required lincomb overload with 4 args
+    // Required lincomb overload
     { self.lincomb_impl( c, xx, c0 ) } -> std::same_as< void >;
 
     // Required dot product
     { self_const.dot_impl( x ) } -> std::same_as< typename T::ScalarType >;
+
+    { self.invert_entries_impl() } -> std::same_as< void >;
+
+    { self.scale_with_vector_impl( x ) } -> std::same_as< void >;
 
     { self.randomize_impl() } -> std::same_as< void >;
 
@@ -86,6 +90,18 @@ ScalarOf< Vector > dot( const Vector& y, const Vector& x )
 }
 
 template < VectorLike Vector >
+void invert_entries( Vector& y )
+{
+    y.invert_entries_impl();
+}
+
+template < VectorLike Vector >
+void scale_in_place( Vector& y, const Vector& x )
+{
+    y.scale_with_vector_impl( x );
+}
+
+template < VectorLike Vector >
 void randomize( Vector& y )
 {
     y.randomize_impl();
@@ -95,6 +111,13 @@ template < VectorLike Vector >
 ScalarOf< Vector > norm_inf( const Vector& y )
 {
     return y.max_abs_entry_impl();
+}
+
+template < VectorLike Vector >
+ScalarOf< Vector > norm_2( const Vector& y )
+{
+    const auto dot_prod = dot( y, y );
+    return std::sqrt( dot_prod );
 }
 
 template < VectorLike Vector >
@@ -137,6 +160,10 @@ class DummyVector
         return 0;
     }
 
+    void invert_entries_impl() {}
+
+    void scale_with_vector_impl( const DummyVector& x ) { (void) x; }
+
     void randomize_impl() {}
 
     ScalarType max_abs_entry_impl() const { return 0; }
@@ -170,6 +197,10 @@ class DummyBlock2Vector
         (void) x;
         return 0;
     }
+
+    void invert_entries_impl() {}
+
+    void scale_with_vector_impl( const DummyBlock2Vector& x ) { (void) x; }
 
     void randomize_impl() {}
 

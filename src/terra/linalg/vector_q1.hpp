@@ -176,6 +176,13 @@ class VectorQ1Scalar
         return kernels::common::masked_dot_product( grid_data_, x.grid_data(), mask_data(), grid::mask_owned() );
     }
 
+    void invert_entries_impl() { kernels::common::invert_inplace( grid_data_ ); }
+
+    void scale_with_vector_impl( const VectorQ1Scalar& x )
+    {
+        kernels::common::mult_elementwise_inplace( grid_data_, x.grid_data() );
+    }
+
     void randomize_impl() { return kernels::common::rand( grid_data_ ); }
 
     ScalarType max_abs_entry_impl() const { return kernels::common::max_abs_entry( grid_data_ ); }
@@ -266,6 +273,13 @@ class VectorQ1Vec
     ScalarType dot_impl( const VectorQ1Vec& x ) const
     {
         return kernels::common::masked_dot_product( grid_data_, x.grid_data(), mask_data_, grid::mask_owned() );
+    }
+
+    void invert_entries_impl() { kernels::common::invert_inplace( grid_data_ ); }
+
+    void scale_with_vector_impl( const VectorQ1Vec& x )
+    {
+        kernels::common::mult_elementwise_inplace( grid_data_, x.grid_data() );
     }
 
     void randomize_impl() { return kernels::common::rand( grid_data_ ); }

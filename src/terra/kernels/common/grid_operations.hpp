@@ -54,6 +54,25 @@ void scale( const grid::Grid4DDataScalar< ScalarType >& x, ScalarType value )
 template < typename ScalarType >
 void assign_masked_else_keep_old(
     const grid::Grid4DDataScalar< ScalarType >&     dst,
+    const ScalarType&                               value,
+    const grid::Grid4DDataScalar< util::MaskType >& mask_grid,
+    const util::MaskAndValue                        mask_and_value )
+{
+    Kokkos::parallel_for(
+        "assign_masked",
+        Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { dst.extent( 0 ), dst.extent( 1 ), dst.extent( 2 ), dst.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
+            const ScalarType mask_val =
+                util::check_bits( mask_grid( local_subdomain, i, j, k ), mask_and_value ) ? 1.0 : 0.0;
+            dst( local_subdomain, i, j, k ) = mask_val * value + ( 1.0 - mask_val ) * dst( local_subdomain, i, j, k );
+        } );
+
+    Kokkos::fence();
+}
+
+template < typename ScalarType >
+void assign_masked_else_keep_old(
+    const grid::Grid4DDataScalar< ScalarType >&     dst,
     const grid::Grid4DDataScalar< ScalarType >&     src,
     const grid::Grid4DDataScalar< util::MaskType >& mask_grid,
     const util::MaskAndValue                        mask_and_value )
@@ -207,6 +226,20 @@ void invert_inplace( const grid::Grid4DDataScalar< ScalarType >& y )
     Kokkos::fence();
 }
 
+template < typename ScalarType, int VecDim >
+void invert_inplace( const grid::Grid4DDataVec< ScalarType, VecDim >& y )
+{
+    Kokkos::parallel_for(
+        "invert",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0, 0 }, { y.extent( 0 ), y.extent( 1 ), y.extent( 2 ), y.extent( 3 ), y.extent( 4 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, int d ) {
+            y( local_subdomain, i, j, k, d ) = 1.0 / y( local_subdomain, i, j, k, d );
+        } );
+
+    Kokkos::fence();
+}
+
 template < typename ScalarType >
 void mult_elementwise_inplace(
     const grid::Grid4DDataScalar< ScalarType >& y,
@@ -217,6 +250,22 @@ void mult_elementwise_inplace(
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { y.extent( 0 ), y.extent( 1 ), y.extent( 2 ), y.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
             y( local_subdomain, i, j, k ) *= x( local_subdomain, i, j, k );
+        } );
+
+    Kokkos::fence();
+}
+
+template < typename ScalarType, int VecDim >
+void mult_elementwise_inplace(
+    const grid::Grid4DDataVec< ScalarType, VecDim >& y,
+    const grid::Grid4DDataVec< ScalarType, VecDim >& x )
+{
+    Kokkos::parallel_for(
+        "mult_elementwise_inplace",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0, 0 }, { y.extent( 0 ), y.extent( 1 ), y.extent( 2 ), y.extent( 3 ), y.extent( 4 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, int d ) {
+            y( local_subdomain, i, j, k, d ) *= x( local_subdomain, i, j, k, d );
         } );
 
     Kokkos::fence();
@@ -472,7 +521,7 @@ void rand( const grid::Grid4DDataScalar< ScalarTypeDst >& dst )
         "rand",
         Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { dst.extent( 0 ), dst.extent( 1 ), dst.extent( 2 ), dst.extent( 3 ) } ),
         KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
-            auto generator = random_pool.get_state();
+            auto generator                  = random_pool.get_state();
             dst( local_subdomain, i, j, k ) = static_cast< ScalarTypeDst >( generator.drand() );
             random_pool.free_state( generator );
         } );
