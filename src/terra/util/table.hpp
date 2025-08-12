@@ -17,8 +17,23 @@ namespace terra::util {
 class Table
 {
   public:
-    using Value = std::variant< std::monostate, int, long, double, bool, std::string >;
-    using Row   = std::unordered_map< std::string, Value >;
+    using Value = std::variant<
+        std::monostate,
+        char,
+        short,
+        int,
+        long,
+        long long,
+        unsigned char,
+        unsigned short,
+        unsigned int,
+        unsigned long,
+        unsigned long long,
+        float,
+        double,
+        bool,
+        std::string >;
+    using Row = std::unordered_map< std::string, Value >;
 
     Table( bool print_on_add = false )
     : print_on_add_( print_on_add )

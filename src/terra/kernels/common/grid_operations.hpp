@@ -93,6 +93,28 @@ void assign_masked_else_keep_old(
 template < typename ScalarType, int VecDim >
 void assign_masked_else_keep_old(
     const grid::Grid4DDataVec< ScalarType, VecDim >& dst,
+    const ScalarType&                                value,
+    const grid::Grid4DDataScalar< util::MaskType >&  mask_grid,
+    const util::MaskAndValue                         mask_and_value )
+{
+    Kokkos::parallel_for(
+        "assign_masked",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0, 0 },
+            { dst.extent( 0 ), dst.extent( 1 ), dst.extent( 2 ), dst.extent( 3 ), dst.extent( 4 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, int d ) {
+            const ScalarType mask_val =
+                util::check_bits( mask_grid( local_subdomain, i, j, k ), mask_and_value ) ? 1.0 : 0.0;
+            dst( local_subdomain, i, j, k, d ) =
+                mask_val * value + ( 1.0 - mask_val ) * dst( local_subdomain, i, j, k, d );
+        } );
+
+    Kokkos::fence();
+}
+
+template < typename ScalarType, int VecDim >
+void assign_masked_else_keep_old(
+    const grid::Grid4DDataVec< ScalarType, VecDim >& dst,
     const grid::Grid4DDataVec< ScalarType, VecDim >& src,
     const grid::Grid4DDataScalar< util::MaskType >&  mask_grid,
     const util::MaskAndValue                         mask_and_value )

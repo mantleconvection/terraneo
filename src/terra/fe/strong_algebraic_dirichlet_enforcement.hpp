@@ -98,4 +98,14 @@ void strong_algebraic_velocity_dirichlet_enforcement_stokes_like(
         b.block_1().grid_data(), tmp.block_1().grid_data(), mask_data, dirichlet_boundary_mask );
 }
 
+template < typename ScalarType >
+void strong_algebraic_homogeneous_velocity_dirichlet_enforcement_stokes_like(
+    linalg::VectorQ1IsoQ2Q1< ScalarType >&          b,
+    const grid::Grid4DDataScalar< util::MaskType >& mask_data,
+    const util::MaskAndValue&                       dirichlet_boundary_mask )
+{
+    // b_elim <- g_D on the Dirichlet boundary
+    kernels::common::assign_masked_else_keep_old( b.block_1().grid_data(), 0.0, mask_data, dirichlet_boundary_mask );
+}
+
 } // namespace terra::fe
