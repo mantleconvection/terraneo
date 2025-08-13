@@ -1,4 +1,3 @@
-
 #pragma once
 #include <mpi.h>
 
@@ -11,6 +10,10 @@
 
 namespace terra::linalg {
 
+/// @brief Set up mask data for a distributed shell domain.
+/// The mask encodes ownership and boundary information for each grid node.
+/// @param domain Distributed shell domain.
+/// @return Mask data grid.
 inline grid::Grid4DDataScalar< util::MaskType > setup_mask_data( const grid::shell::DistributedDomain& domain )
 {
     grid::Grid4DDataScalar< util::MaskType > mask_data =
@@ -110,14 +113,23 @@ inline grid::Grid4DDataScalar< util::MaskType > setup_mask_data( const grid::she
     return mask_data;
 }
 
+/// @brief Q1 scalar finite element vector on a distributed shell grid.
+/// Satisfies the VectorLike concept (see vector.hpp).
+/// Provides masked grid data and operations for scalar fields.
 template < typename ScalarT >
 class VectorQ1Scalar
 {
   public:
+    /// @brief Scalar type of the vector.
     using ScalarType = ScalarT;
 
+    /// @brief Default constructor.
     VectorQ1Scalar() = default;
 
+    /// @brief Construct a Q1 scalar vector with label, domain, and mask data.
+    /// @param label Name for the vector.
+    /// @param distributed_domain Distributed shell domain.
+    /// @param mask_data Mask data grid.
     VectorQ1Scalar(
         const std::string&                              label,
         const grid::shell::DistributedDomain&           distributed_domain,
@@ -141,6 +153,11 @@ class VectorQ1Scalar
         }
     }
 
+    /// @brief Linear combination implementation for VectorLike concept.
+    /// Computes: \f$ y = c_0 + \sum_i c_i x_i \f$
+    /// @param c Coefficients.
+    /// @param x Input vectors.
+    /// @param c0 Scalar to add.
     void lincomb_impl( const std::vector< ScalarType >& c, const std::vector< VectorQ1Scalar >& x, const ScalarType c0 )
     {
         if ( c.size() != x.size() )
@@ -171,49 +188,82 @@ class VectorQ1Scalar
         }
     }
 
+    /// @brief Dot product implementation for VectorLike concept.
+    /// Computes: \f$ \sum_{i} y_i \cdot x_i \f$ over owned nodes.
+    /// @param x Other vector.
+    /// @return Dot product value.
     ScalarType dot_impl( const VectorQ1Scalar& x ) const
     {
         return kernels::common::masked_dot_product( grid_data_, x.grid_data(), mask_data(), grid::mask_owned() );
     }
 
+    /// @brief Invert entries implementation for VectorLike concept.
+    /// Computes: \f$ y_i = 1 / y_i \f$
     void invert_entries_impl() { kernels::common::invert_inplace( grid_data_ ); }
 
+    /// @brief Elementwise scaling implementation for VectorLike concept.
+    /// Computes: \f$ y_i = y_i \cdot x_i \f$
+    /// @param x Scaling vector.
     void scale_with_vector_impl( const VectorQ1Scalar& x )
     {
         kernels::common::mult_elementwise_inplace( grid_data_, x.grid_data() );
     }
 
+    /// @brief Randomize entries implementation for VectorLike concept.
+    /// Sets each entry of grid_data to a random value.
     void randomize_impl() { return kernels::common::rand( grid_data_ ); }
 
+    /// @brief Max absolute entry implementation for VectorLike concept.
+    /// Computes: \f$ \max_i |y_i| \f$
+    /// @return Maximum absolute value.
     ScalarType max_abs_entry_impl() const { return kernels::common::max_abs_entry( grid_data_ ); }
 
+    /// @brief NaN check implementation for VectorLike concept.
+    /// Returns true if any entry of grid_data is NaN.
+    /// @return True if NaN is present.
     bool has_nan_impl() const { return kernels::common::has_nan( grid_data_ ); }
 
+    /// @brief Swap implementation for VectorLike concept.
+    /// Exchanges grid_data and mask_data with another vector.
+    /// @param other Other vector.
     void swap_impl( VectorQ1Scalar& other )
     {
         std::swap( grid_data_, other.grid_data_ );
         std::swap( mask_data_, other.mask_data_ );
     }
 
+    /// @brief Get const reference to grid data.
     const grid::Grid4DDataScalar< ScalarType >& grid_data() const { return grid_data_; }
-    grid::Grid4DDataScalar< ScalarType >&       grid_data() { return grid_data_; }
+    /// @brief Get mutable reference to grid data.
+    grid::Grid4DDataScalar< ScalarType >& grid_data() { return grid_data_; }
 
+    /// @brief Get const reference to mask data.
     const grid::Grid4DDataScalar< util::MaskType >& mask_data() const { return mask_data_; }
-    grid::Grid4DDataScalar< util::MaskType >&       mask_data() { return mask_data_; }
+    /// @brief Get mutable reference to mask data.
+    grid::Grid4DDataScalar< util::MaskType >& mask_data() { return mask_data_; }
 
   private:
     grid::Grid4DDataScalar< ScalarType >     grid_data_;
     grid::Grid4DDataScalar< util::MaskType > mask_data_;
 };
 
+/// @brief Static assertion: VectorQ1Scalar satisfies VectorLike concept.
 static_assert( VectorLike< VectorQ1Scalar< double > > );
 
+/// @brief Q1 vector finite element vector on a distributed shell grid.
+/// Satisfies the VectorLike concept (see vector.hpp).
+/// Provides masked grid data and operations for vector fields.
 template < typename ScalarT, int VecDim = 3 >
 class VectorQ1Vec
 {
   public:
+    /// @brief Default constructor.
     VectorQ1Vec() = default;
 
+    /// @brief Construct a Q1 vector with label, domain, and mask data.
+    /// @param label Name for the vector.
+    /// @param distributed_domain Distributed shell domain.
+    /// @param mask_data Mask data grid.
     VectorQ1Vec(
         const std::string&                              label,
         const grid::shell::DistributedDomain&           distributed_domain,
@@ -237,9 +287,16 @@ class VectorQ1Vec
         }
     }
 
-    using ScalarType     = ScalarT;
+    /// @brief Scalar type of the vector.
+    using ScalarType = ScalarT;
+    /// @brief Dimension of the vector field.
     const static int Dim = VecDim;
 
+    /// @brief Linear combination implementation for VectorLike concept.
+    /// Computes: \f$ y = c_0 + \sum_i c_i x_i \f$
+    /// @param c Coefficients.
+    /// @param x Input vectors.
+    /// @param c0 Scalar to add.
     void lincomb_impl( const std::vector< ScalarType >& c, const std::vector< VectorQ1Vec >& x, const ScalarType c0 )
     {
         if ( c.size() != x.size() )
@@ -270,41 +327,66 @@ class VectorQ1Vec
         }
     }
 
+    /// @brief Dot product implementation for VectorLike concept.
+    /// Computes: \f$ \sum_{i} y_i \cdot x_i \f$ over owned nodes.
+    /// @param x Other vector.
+    /// @return Dot product value.
     ScalarType dot_impl( const VectorQ1Vec& x ) const
     {
         return kernels::common::masked_dot_product( grid_data_, x.grid_data(), mask_data_, grid::mask_owned() );
     }
 
+    /// @brief Invert entries implementation for VectorLike concept.
+    /// Computes: \f$ y_i = 1 / y_i \f$
     void invert_entries_impl() { kernels::common::invert_inplace( grid_data_ ); }
 
+    /// @brief Elementwise scaling implementation for VectorLike concept.
+    /// Computes: \f$ y_i = y_i \cdot x_i \f$
+    /// @param x Scaling vector.
     void scale_with_vector_impl( const VectorQ1Vec& x )
     {
         kernels::common::mult_elementwise_inplace( grid_data_, x.grid_data() );
     }
 
+    /// @brief Randomize entries implementation for VectorLike concept.
+    /// Sets each entry of grid_data to a random value.
     void randomize_impl() { return kernels::common::rand( grid_data_ ); }
 
+    /// @brief Max absolute entry implementation for VectorLike concept.
+    /// Computes: \f$ \max_i |y_i| \f$
+    /// @return Maximum absolute value.
     ScalarType max_abs_entry_impl() const { return kernels::common::max_abs_entry( grid_data_ ); }
 
+    /// @brief NaN check implementation for VectorLike concept.
+    /// Returns true if any entry of grid_data is NaN.
+    /// @return True if NaN is present.
     bool has_nan_impl() const { return kernels::common::has_nan( grid_data_ ); }
 
+    /// @brief Swap implementation for VectorLike concept.
+    /// Exchanges grid_data and mask_data with another vector.
+    /// @param other Other vector.
     void swap_impl( VectorQ1Vec& other )
     {
         std::swap( grid_data_, other.grid_data_ );
         std::swap( mask_data_, other.mask_data_ );
     }
 
+    /// @brief Get const reference to grid data.
     const grid::Grid4DDataVec< ScalarType, VecDim >& grid_data() const { return grid_data_; }
-    grid::Grid4DDataVec< ScalarType, VecDim >&       grid_data() { return grid_data_; }
+    /// @brief Get mutable reference to grid data.
+    grid::Grid4DDataVec< ScalarType, VecDim >& grid_data() { return grid_data_; }
 
+    /// @brief Get const reference to mask data.
     const grid::Grid4DDataScalar< util::MaskType >& mask_data() const { return mask_data_; }
-    grid::Grid4DDataScalar< util::MaskType >&       mask_data() { return mask_data_; }
+    /// @brief Get mutable reference to mask data.
+    grid::Grid4DDataScalar< util::MaskType >& mask_data() { return mask_data_; }
 
   private:
     grid::Grid4DDataVec< ScalarType, VecDim > grid_data_;
     grid::Grid4DDataScalar< util::MaskType >  mask_data_;
 };
 
+/// @brief Static assertion: VectorQ1Vec satisfies VectorLike concept.
 static_assert( VectorLike< VectorQ1Vec< double, 3 > > );
 
 } // namespace terra::linalg
