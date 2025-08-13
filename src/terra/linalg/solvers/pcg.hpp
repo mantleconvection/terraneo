@@ -1,5 +1,3 @@
-
-
 #pragma once
 
 #include "identity_solver.hpp"
@@ -11,22 +9,47 @@
 
 namespace terra::linalg::solvers {
 
+/// @brief Preconditioned Conjugate Gradient (PCG) iterative solver for symmetric positive definite linear systems.
+/// 
+/// See, e.g., 
+/// @code
+/// Elman, H. C., Silvester, D. J., & Wathen, A. J. (2014). 
+/// Finite elements and fast iterative solvers: with applications in incompressible fluid dynamics. 
+/// Oxford university press. 
+/// @endcode
+///
+/// Satisfies the SolverLike concept (see solver.hpp).
+/// Supports optional preconditioning.
+/// @tparam OperatorT Operator type (must satisfy OperatorLike).
+/// @tparam PreconditionerT Preconditioner type (must satisfy SolverLike, defaults to IdentitySolver).
 template < OperatorLike OperatorT, SolverLike PreconditionerT = IdentitySolver< OperatorT > >
 class PCG
 {
   public:
+    /// @brief Operator type to be solved.
     using OperatorType       = OperatorT;
+    /// @brief Solution vector type.
     using SolutionVectorType = SrcOf< OperatorType >;
+    /// @brief Right-hand side vector type.
     using RHSVectorType      = DstOf< OperatorType >;
+    /// @brief Scalar type for computations.
+    using ScalarType         = typename SolutionVectorType::ScalarType;
 
-    using ScalarType = typename SolutionVectorType::ScalarType;
-
+    /// @brief Construct a PCG solver with default identity preconditioner.
+    /// @param params Iterative solver parameters.
+    /// @param statistics Shared pointer to statistics table.
+    /// @param tmps Temporary vectors for workspace. (At least 4 vectors are required.)
     PCG( const IterativeSolverParameters&         params,
          const std::shared_ptr< util::Table >&    statistics,
          const std::vector< SolutionVectorType >& tmps )
     : PCG( params, statistics, tmps, IdentitySolver< OperatorT >() )
     {}
 
+    /// @brief Construct a PCG solver with a custom preconditioner.
+    /// @param params Iterative solver parameters.
+    /// @param statistics Shared pointer to statistics table.
+    /// @param tmps Temporary vectors for workspace. (At least 4 vectors are required.)
+    /// @param preconditioner Preconditioner solver.
     PCG( const IterativeSolverParameters&         params,
          const std::shared_ptr< util::Table >&    statistics,
          const std::vector< SolutionVectorType >& tmps,
@@ -43,14 +66,21 @@ class PCG
         }
     }
 
+    /// @brief Set a tag string for statistics output.
+    /// @param tag Tag string.
     void set_tag( const std::string& tag ) { tag_ = tag; }
 
+    /// @brief Solve the linear system \f$ Ax = b \f$ using PCG.
+    /// Calls the iterative solver and updates statistics.
+    /// @param A Operator (matrix).
+    /// @param x Solution vector (output).
+    /// @param b Right-hand side vector (input).
     void solve_impl( OperatorType& A, SolutionVectorType& x, const RHSVectorType& b )
     {
-        auto& r_  = tmps_[0];
-        auto& p_  = tmps_[1];
-        auto& ap_ = tmps_[2];
-        auto& z_  = tmps_[3];
+        auto& r_  = tmps_[0]; ///< Residual vector.
+        auto& p_  = tmps_[1]; ///< Search direction vector.
+        auto& ap_ = tmps_[2]; ///< Temporary vector for A*p.
+        auto& z_  = tmps_[3]; ///< Preconditioned residual vector.
 
         apply( A, x, r_ );
 
@@ -123,17 +153,18 @@ class PCG
     }
 
   private:
-    std::string tag_;
+    std::string tag_; ///< Tag for statistics output.
 
-    IterativeSolverParameters params_;
+    IterativeSolverParameters params_; ///< Solver parameters.
 
-    std::shared_ptr< util::Table > statistics_;
+    std::shared_ptr< util::Table > statistics_; ///< Statistics table.
 
-    std::vector< SolutionVectorType > tmps_;
+    std::vector< SolutionVectorType > tmps_; ///< Temporary workspace vectors.
 
-    PreconditionerT preconditioner_;
+    PreconditionerT preconditioner_; ///< Preconditioner solver.
 };
 
+/// @brief Static assertion: PCG satisfies SolverLike concept.
 static_assert(
     SolverLike<
         PCG< linalg::detail::

@@ -304,7 +304,8 @@ std::pair< double, double > test( int level, const std::shared_ptr< util::Table 
 
     linalg::solvers::IterativeSolverParameters solver_params{ 3000, 1e-8, 1e-12 };
 
-    linalg::solvers::PMINRES< Stokes > pminres( solver_params, table, tmp_0, tmp_1, tmp_2, tmp_3, tmp_4, tmp_5, tmp_6 );
+    linalg::solvers::PMINRES< Stokes > pminres(
+        solver_params, table, { tmp_0, tmp_1, tmp_2, tmp_3, tmp_4, tmp_5, tmp_6 } );
     pminres.set_tag( "pminres_solver_level_" + std::to_string( level ) );
 
     solve( pminres, K, w, b );

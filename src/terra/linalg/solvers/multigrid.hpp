@@ -1,5 +1,3 @@
-
-
 #pragma once
 
 #include "solver.hpp"
@@ -8,6 +6,16 @@
 
 namespace terra::linalg::solvers {
 
+/// @brief Multigrid solver for linear systems.
+/// 
+/// Satisfies the SolverLike concept (see solver.hpp).
+/// Supports arbitrary operators, prolongation/restriction, smoothers, and coarse grid solvers.
+/// Implements recursive V-cycle multigrid.
+/// @tparam OperatorT Operator type (must satisfy OperatorLike).
+/// @tparam ProlongationT Prolongation operator type (must satisfy OperatorLike).
+/// @tparam RestrictionT Restriction operator type (must satisfy OperatorLike).
+/// @tparam SmootherT Smoother type (must satisfy SolverLike).
+/// @tparam CoarseGridSolverT Coarse grid solver type (must satisfy SolverLike).
 template <
     OperatorLike OperatorT,
     OperatorLike ProlongationT,
@@ -17,35 +25,60 @@ template <
 class Multigrid
 {
   public:
+    /// @brief Operator type to be solved.
     using OperatorType         = OperatorT;
+    /// @brief Prolongation operator type.
     using ProlongationType     = ProlongationT;
+    /// @brief Restriction operator type.
     using RestrictionType      = RestrictionT;
+    /// @brief Smoother type.
     using SmootherType         = SmootherT;
+    /// @brief Coarse grid solver type.
     using CoarseGridSolverType = CoarseGridSolverT;
 
+    /// @brief Solution vector type.
     using SolutionVectorType = SrcOf< OperatorType >;
+    /// @brief Right-hand side vector type.
     using RHSVectorType      = DstOf< OperatorType >;
 
+    /// @brief Scalar type for computations.
     using ScalarType = SolutionVectorType::ScalarType;
 
   private:
-    std::vector< ProlongationType >   P_additive_;
-    std::vector< RestrictionType >    R_;
-    std::vector< OperatorT >          A_c_;
-    std::vector< SolutionVectorType > tmp_r_;
-    std::vector< SolutionVectorType > tmp_e_;
-    std::vector< SolutionVectorType > tmp_;
-    std::vector< SmootherType >       smoothers_pre_;
-    std::vector< SmootherType >       smoothers_post_;
-    CoarseGridSolverType              coarse_grid_solver_;
+    std::vector< ProlongationType >   P_additive_; ///< Prolongation operators for each level.
+    std::vector< RestrictionType >    R_;          ///< Restriction operators for each level.
+    std::vector< OperatorT >          A_c_;        ///< Coarse grid operators for each level.
+    std::vector< SolutionVectorType > tmp_r_;      ///< Temporary residual vectors for each level.
+    std::vector< SolutionVectorType > tmp_e_;      ///< Temporary error vectors for each level.
+    std::vector< SolutionVectorType > tmp_;        ///< Temporary workspace vectors for each level.
+    std::vector< SmootherType >       smoothers_pre_;  ///< Pre-smoothers for each level.
+    std::vector< SmootherType >       smoothers_post_; ///< Post-smoothers for each level.
+    CoarseGridSolverType              coarse_grid_solver_; ///< Coarse grid solver.
 
-    int        num_cycles_;
-    ScalarType relative_residual_threshold_;
+    int        num_cycles_;                   ///< Number of multigrid cycles to perform.
+    ScalarType relative_residual_threshold_;  ///< Relative residual threshold for stopping.
 
-    std::shared_ptr< util::Table > statistics_;
-    std::string                    tag_ = "multigrid";
+    std::shared_ptr< util::Table > statistics_; ///< Statistics table.
+    std::string                    tag_ = "multigrid"; ///< Tag for statistics output.
 
   public:
+    /// @brief Construct a multigrid solver.
+    ///
+    /// Vector ordering of arguments always goes from the coarsest level (index 0) to the finest.
+    ///
+    /// @param P_additive Prolongation operators for each coarse level. 
+    ///                   Size must match the number of levels - 1.
+    ///                   Must be additive prolongation operators, i.e., @code apply( P, x, y ) @endcode computes \f$ y = y + P x \f$.
+    /// @param R Restriction operators for each coarse level.
+    /// @param A_c Coarse grid operators for each coarse level.
+    /// @param tmp_r Temporary residual vectors for each coarse level.
+    /// @param tmp_e Temporary error vectors for each coarse level.
+    /// @param tmp Temporary workspace vectors for each level (including the finest level).
+    /// @param smoothers_pre Pre-smoothers for each level (including the finest level).
+    /// @param smoothers_post Post-smoothers for each level (including the finest level).
+    /// @param coarse_grid_solver Coarse grid solver.
+    /// @param num_cycles Number of multigrid cycles to perform.
+    /// @param relative_residual_threshold Relative residual threshold for stopping.
     Multigrid(
         const std::vector< ProlongationType >&   P_additive,
         const std::vector< RestrictionType >&    R,
@@ -71,9 +104,19 @@ class Multigrid
     , relative_residual_threshold_( relative_residual_threshold )
     {}
 
+    /// @brief Set a tag string for statistics output.
+    /// @param tag Tag string.
     void set_tag( const std::string& tag ) { tag_ = tag; }
+
+    /// @brief Collect statistics in a shared table.
+    /// @param statistics Shared pointer to statistics table.
     void collect_statistics( const std::shared_ptr< util::Table >& statistics ) { statistics_ = statistics; }
 
+    /// @brief Solve the linear system using multigrid cycles.
+    /// Calls the recursive V-cycle and updates statistics.
+    /// @param A Operator (matrix).
+    /// @param x Solution vector (output).
+    /// @param b Right-hand side vector (input).
     void solve_impl( OperatorType& A, SolutionVectorType& x, const RHSVectorType& b )
     {
         if ( P_additive_.size() != A_c_.size() || R_.size() != A_c_.size() || tmp_r_.size() != A_c_.size() ||
@@ -134,6 +177,11 @@ class Multigrid
     }
 
   private:
+    /// @brief Recursive V-cycle multigrid solver.
+    /// @param A Operator (matrix) at current level.
+    /// @param x Solution vector (output) at current level.
+    /// @param b Right-hand side vector (input) at current level.
+    /// @param level Current multigrid level.
     void solve_recursive( OperatorType& A, SolutionVectorType& x, const RHSVectorType& b, int level )
     {
         if ( level == 0 )
@@ -163,4 +211,5 @@ class Multigrid
         solve( smoothers_post_[level], A, x, b );
     }
 };
+
 } // namespace terra::linalg::solvers

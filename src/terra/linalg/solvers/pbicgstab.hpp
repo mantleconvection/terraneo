@@ -1,5 +1,3 @@
-
-
 #pragma once
 
 #include "eigen/eigen_wrapper.hpp"
@@ -12,16 +10,39 @@
 
 namespace terra::linalg::solvers {
 
+/// @brief BiCGStab(l) iterative solver for general (possibly unsymmetric) linear systems.
+///
+/// See
+/// @code  
+/// Sleijpen, G. L., & Fokkema, D. R. (1993). 
+/// BiCGstab (ell) for linear equations involving unsymmetric matrices with complex spectrum. 
+/// Electronic Transactions on Numerical Analysis., 1, 11-32.
+/// @endcode
+/// for details.
+///
+/// Satisfies the SolverLike concept (see solver.hpp).
+/// Supports optional preconditioning.
+/// @tparam OperatorT Operator type (must satisfy OperatorLike).
+/// @tparam PreconditionerT Preconditioner type (must satisfy SolverLike, defaults to IdentitySolver).
 template < OperatorLike OperatorT, SolverLike PreconditionerT = IdentitySolver< OperatorT > >
 class PBiCGStab
 {
   public:
+    /// @brief Operator type to be solved.
     using OperatorType       = OperatorT;
+    /// @brief Solution vector type.
     using SolutionVectorType = SrcOf< OperatorType >;
+    /// @brief Right-hand side vector type.
     using RHSVectorType      = DstOf< OperatorType >;
+    /// @brief Scalar type for computations.
+    using ScalarType         = typename SolutionVectorType::ScalarType;
 
-    using ScalarType = typename SolutionVectorType::ScalarType;
-
+    /// @brief Construct a PBiCGStab solver.
+    /// @param l Number of BiCG iterations per "minimal residual" (MR) step.
+    /// @param params Iterative solver parameters.
+    /// @param statistics Shared pointer to statistics table.
+    /// @param tmp Temporary vectors for workspace. (At least 2 * (l + 1) + 2 vectors are required.)
+    /// @param preconditioner Preconditioner solver (optional).
     PBiCGStab(
         const int                                l,
         const IterativeSolverParameters&         params,
@@ -39,7 +60,7 @@ class PBiCGStab
         if ( tmp.size() < num_required_tmp_vectors )
         {
             throw std::runtime_error(
-                "PBiCGStab: tmp.size() != 2 * (l+1) + 2 = " + std::to_string( num_required_tmp_vectors ) );
+                "PBiCGStab: tmp.size() < 2 * (l+1) + 2 = " + std::to_string( num_required_tmp_vectors ) );
         }
 
         if ( tmp.size() > num_required_tmp_vectors )
@@ -49,8 +70,15 @@ class PBiCGStab
         }
     }
 
+    /// @brief Set a tag string for statistics output.
+    /// @param tag Tag string.
     void set_tag( const std::string& tag ) { tag_ = tag; }
 
+    /// @brief Solve the linear system \( Ax = b \) using PBiCGStab.
+    /// Calls the iterative solver and updates statistics.
+    /// @param A Operator (matrix).
+    /// @param x Solution vector (output).
+    /// @param b Right-hand side vector (input).
     void solve_impl( OperatorType& A, SolutionVectorType& x, const RHSVectorType& b )
     {
         linalg::randomize( r_shadow() );
@@ -76,6 +104,7 @@ class PBiCGStab
         ScalarType relative_residual = 1.0;
         int        iteration         = 0;
 
+        /// @brief Lambda to add a row to the statistics table.
         auto add_table_row = [&]( bool final_iteration ) {
             if ( statistics_ )
             {
@@ -110,7 +139,6 @@ class PBiCGStab
         ScalarType sigma = 1;
 
         Eigen::Matrix< ScalarType, Eigen::Dynamic, Eigen::Dynamic > M( l_, l_ );
-
         Eigen::Matrix< ScalarType, Eigen::Dynamic, 1 > gamma( l_ );
 
         iteration++;
@@ -197,7 +225,6 @@ class PBiCGStab
             omega = gamma( l_ - 1 );
 
             absolute_residual = std::sqrt( dot( residual(), residual() ) );
-
             relative_residual = absolute_residual / initial_residual;
 
             add_table_row( false );
@@ -219,25 +246,31 @@ class PBiCGStab
     }
 
   private:
+    /// @brief Accessor for the shadow residual vector.
     SolutionVectorType& r_shadow() { return tmp_[0]; }
+    /// @brief Accessor for the j-th residual vector.
     SolutionVectorType& rs( int index ) { return tmp_[1 + index]; }
+    /// @brief Accessor for the j-th search direction vector.
     SolutionVectorType& us( int index ) { return tmp_[1 + l_ + 1 + index]; }
+    /// @brief Accessor for the temporary preconditioner vector.
     SolutionVectorType& tmp_prec() { return tmp_[1 + 2 * ( l_ + 1 )]; }
+    /// @brief Accessor for the main residual vector.
     SolutionVectorType& residual() { return rs( 0 ); }
 
-    int l_;
+    int l_; ///< Number of BiCG iterations per MR step.
 
-    IterativeSolverParameters params_;
+    IterativeSolverParameters params_; ///< Solver parameters.
 
-    std::shared_ptr< util::Table > statistics_;
+    std::shared_ptr< util::Table > statistics_; ///< Statistics table.
 
-    std::vector< SolutionVectorType > tmp_;
+    std::vector< SolutionVectorType > tmp_; ///< Temporary workspace vectors.
 
-    std::string tag_;
+    std::string tag_; ///< Tag for statistics output.
 
-    PreconditionerT preconditioner_;
+    PreconditionerT preconditioner_; ///< Preconditioner solver.
 };
 
+/// @brief Static assertion: PBiCGStab satisfies SolverLike concept.
 static_assert( SolverLike< PBiCGStab< linalg::detail::DummyOperator<
                    linalg::detail::DummyVector< double >,
                    linalg::detail::DummyVector< double > > > > );

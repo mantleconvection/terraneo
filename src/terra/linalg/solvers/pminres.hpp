@@ -1,5 +1,3 @@
-
-
 #pragma once
 
 #include "identity_solver.hpp"
@@ -11,67 +9,79 @@
 
 namespace terra::linalg::solvers {
 
+/// @brief Preconditioned MINRES (PMINRES) iterative solver for symmetric indefinite linear systems.
+///
+/// See, e.g., 
+/// @code
+/// Elman, H. C., Silvester, D. J., & Wathen, A. J. (2014). 
+/// Finite elements and fast iterative solvers: with applications in incompressible fluid dynamics. 
+/// Oxford university press. 
+/// @endcode
+///
+/// Satisfies the SolverLike concept (see solver.hpp).
+/// Supports optional preconditioning.
+/// @tparam OperatorT Operator type (must satisfy OperatorLike).
+/// @tparam PreconditionerT Preconditioner type (must satisfy SolverLike, defaults to IdentitySolver).
 template < OperatorLike OperatorT, SolverLike PreconditionerT = IdentitySolver< OperatorT > >
 class PMINRES
 {
   public:
+    /// @brief Operator type to be solved.
     using OperatorType       = OperatorT;
+    /// @brief Solution vector type.
     using SolutionVectorType = SrcOf< OperatorType >;
+    /// @brief Right-hand side vector type.
     using RHSVectorType      = DstOf< OperatorType >;
+    /// @brief Scalar type for computations.
+    using ScalarType         = typename SolutionVectorType::ScalarType;
 
-    using ScalarType = typename SolutionVectorType::ScalarType;
-
+    /// @brief Construct a PMINRES solver with default identity preconditioner.
+    /// @param params Iterative solver parameters.
+    /// @param statistics Shared pointer to statistics table.
+    /// @param tmp Temporary vectors for workspace.
     PMINRES(
-        const IterativeSolverParameters&      params,
-        const std::shared_ptr< util::Table >& statistics,
-        const RHSVectorType&                  az_tmp,
-        const RHSVectorType&                  v_j_minus_1_tmp,
-        const RHSVectorType&                  v_j_tmp,
-        const SolutionVectorType&             w_j_minus_1_tmp,
-        const SolutionVectorType&             w_j_tmp,
-        const SolutionVectorType&             z_tmp,
-        const SolutionVectorType&             z_j_plus_1_tmp )
-    : PMINRES(
-          params,
-          statistics,
-          az_tmp,
-          v_j_minus_1_tmp,
-          v_j_tmp,
-          w_j_minus_1_tmp,
-          w_j_tmp,
-          z_tmp,
-          z_j_plus_1_tmp,
-          IdentitySolver< OperatorT >() )
+        const IterativeSolverParameters&         params,
+        const std::shared_ptr< util::Table >&    statistics,
+        const std::vector< SolutionVectorType >& tmp )
+    : PMINRES( params, statistics, tmp, IdentitySolver< OperatorT >() )
     {}
 
+    /// @brief Construct a PMINRES solver with a custom preconditioner.
+    /// @param params Iterative solver parameters.
+    /// @param statistics Shared pointer to statistics table.
+    /// @param tmp Temporary vectors for workspace.
+    /// @param preconditioner Preconditioner solver.
     PMINRES(
-        const IterativeSolverParameters&      params,
-        const std::shared_ptr< util::Table >& statistics,
-        const RHSVectorType&                  az_tmp,
-        const RHSVectorType&                  v_j_minus_1_tmp,
-        const RHSVectorType&                  v_j_tmp,
-        const SolutionVectorType&             w_j_minus_1_tmp,
-        const SolutionVectorType&             w_j_tmp,
-        const SolutionVectorType&             z_tmp,
-        const SolutionVectorType&             z_j_plus_1_tmp,
-        const PreconditionerT                 preconditioner )
+        const IterativeSolverParameters&         params,
+        const std::shared_ptr< util::Table >&    statistics,
+        const std::vector< SolutionVectorType >& tmp,
+        const PreconditionerT                    preconditioner )
     : tag_( "pminres_solver" )
     , params_( params )
     , statistics_( statistics )
-    , az_( az_tmp )
-    , v_j_minus_1_( v_j_minus_1_tmp )
-    , v_j_( v_j_tmp )
-    , w_j_minus_1_( w_j_minus_1_tmp )
-    , w_j_( w_j_tmp )
-    , z_j_plus_1_( z_j_plus_1_tmp )
-    , z_( z_tmp )
+    , tmp_( tmp )
     , preconditioner_( preconditioner )
     {}
 
+    /// @brief Set a tag string for statistics output.
+    /// @param tag Tag string.
     void set_tag( const std::string& tag ) { tag_ = tag; }
 
+    /// @brief Solve the linear system \f$ Ax = b \f$ using PMINRES.
+    /// Calls the iterative solver and updates statistics.
+    /// @param A Operator (matrix).
+    /// @param x Solution vector (output).
+    /// @param b Right-hand side vector (input).
     void solve_impl( OperatorType& A, SolutionVectorType& x, const RHSVectorType& b )
     {
+        auto& az_          = tmp_[0]; ///< Temporary vector for A*z.
+        auto& v_j_minus_1_ = tmp_[1]; ///< Temporary vector for v_{j-1}.
+        auto& v_j_         = tmp_[2]; ///< Temporary vector for v_j.
+        auto& w_j_minus_1_ = tmp_[3]; ///< Temporary vector for w_{j-1}.
+        auto& w_j_         = tmp_[4]; ///< Temporary vector for w_j.
+        auto& z_j_plus_1_  = tmp_[5]; ///< Temporary vector for z_{j+1}.
+        auto& z_           = tmp_[6]; ///< Temporary vector for z.
+
         assign( v_j_minus_1_, 0 );
         assign( w_j_, 0 );
         assign( w_j_minus_1_, 0 );
@@ -174,23 +184,18 @@ class PMINRES
     }
 
   private:
-    std::string tag_;
+    std::string tag_; ///< Tag for statistics output.
 
-    IterativeSolverParameters params_;
+    IterativeSolverParameters params_; ///< Solver parameters.
 
-    std::shared_ptr< util::Table > statistics_;
+    std::shared_ptr< util::Table > statistics_; ///< Statistics table.
 
-    RHSVectorType      az_;
-    RHSVectorType      v_j_minus_1_;
-    RHSVectorType      v_j_;
-    SolutionVectorType w_j_minus_1_;
-    SolutionVectorType w_j_;
-    SolutionVectorType z_j_plus_1_;
-    SolutionVectorType z_;
+    std::vector< SolutionVectorType > tmp_; ///< Temporary workspace vectors.
 
-    PreconditionerT preconditioner_;
+    PreconditionerT preconditioner_; ///< Preconditioner solver.
 };
 
+/// @brief Static assertion: PMINRES satisfies SolverLike concept.
 static_assert( SolverLike< PMINRES< linalg::detail::DummyOperator<
                    linalg::detail::DummyVector< double >,
                    linalg::detail::DummyVector< double > > > > );

@@ -181,7 +181,8 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     linalg::solvers::IterativeSolverParameters solver_params{ 100, 1e-12, 1e-12 };
 
-    linalg::solvers::PMINRES< Laplace > pminres( solver_params, table, tmp, tmp_2, tmp_3, tmp_4, tmp_5, tmp_6, tmp_7 );
+    linalg::solvers::PMINRES< Laplace > pminres(
+        solver_params, table, { tmp, tmp_2, tmp_3, tmp_4, tmp_5, tmp_6, tmp_7 } );
     pminres.set_tag( "pminres_solver_level_" + std::to_string( level ) );
 
     Kokkos::fence();
