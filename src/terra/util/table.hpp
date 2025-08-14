@@ -18,16 +18,19 @@ namespace terra::util {
 ///
 /// Provides functionality to add rows, select columns, query data, and print in various formats (pretty, JSON lines, CSV).
 ///
-/// Not optimized for performance, but designed for ease of use and flexibility.
+/// Not optimized for performance but designed for ease of use and flexibility.
 /// If you need high performance, or millions of rows, consider using a database or specialized library.
 /// But still useful for small to medium datasets, logging, prototyping, and data analysis tasks.
-///
 ///
 /// Rows are stored as maps from column names to values.
 /// Columns are dynamically added as needed.
 ///
-/// Each row automatically gets an "id" and "timestamp" column.
-/// Supports various value types including strings, numbers, booleans, and None (null).
+/// Supports various value types, including strings, numbers, booleans, and None (null).
+///
+/// @note Each row automatically gets an "id" and "timestamp" column.
+///
+/// @note For logging, the convention is that most functions use the key "tag" to add some keyword to the table. To
+///       later sort data, therefore add a "tag" to mark where the data comes from.
 ///
 /// Example usage:
 /// @code
