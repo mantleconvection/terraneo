@@ -133,6 +133,8 @@ class Table
         Row row;
         row["id"]        = global_id_counter++;
         row["timestamp"] = current_timestamp();
+        columns_.insert( "id" );
+        columns_.insert( "timestamp" );
 
         for ( const auto& [key, value] : row_data )
         {
@@ -149,6 +151,12 @@ class Table
     [[nodiscard]] Table select_columns( const std::vector< std::string >& selected_columns ) const
     {
         Table result;
+
+        for ( const auto& col : selected_columns )
+        {
+            result.columns_.insert( col );
+        }
+
         for ( const auto& row : rows_ )
         {
             Row new_row;
@@ -396,7 +404,7 @@ class Table
     std::vector< Row >      rows_;    ///< Rows of the table.
     std::set< std::string > columns_; ///< Set of column names.
 
-    inline static int global_id_counter = 1; ///< Global row id counter.
+    inline static int global_id_counter = 0; ///< Global row id counter.
 
     /// @brief Get the current timestamp as a string.
     /// @return Timestamp string.
