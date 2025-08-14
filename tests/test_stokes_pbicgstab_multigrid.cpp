@@ -553,13 +553,13 @@ int main( int argc, char** argv )
         prev_l2_error_vel = l2_error_vel;
         prev_l2_error_pre = l2_error_pre;
 
-        table->query_equals( "tag", "pbicgstab_solver" ).print_pretty();
+        table->query_rows_equals( "tag", "pbicgstab_solver" ).print_pretty();
         table->clear();
     }
 
-    table->query_not_none( "order_vel" ).select( { "level", "order_vel", "order_pre" } ).print_pretty();
-    table->query_not_none( "dofs_vel" )
-        .select( { "level", "dofs_vel", "l2_error_vel", "l2_error_pre" } )
+    table->query_rows_not_none( "order_vel" ).select_columns( { "level", "order_vel", "order_pre" } ).print_pretty();
+    table->query_rows_not_none( "dofs_vel" )
+        .select_columns( { "level", "dofs_vel", "l2_error_vel", "l2_error_pre" } )
         .print_pretty();
 
     return 0;

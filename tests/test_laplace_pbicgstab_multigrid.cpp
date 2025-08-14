@@ -361,10 +361,10 @@ int main( int argc, char** argv )
         }
         prev_l2_error = l2_error;
 
-        table->query_equals( "tag", "pbicgstab_solver" ).print_pretty();
+        table->query_rows_equals( "tag", "pbicgstab_solver" ).print_pretty();
         // table->query_equals( "tag", "multigrid" ).print_pretty();
-        table->query_equals( "tag", "time_solver" ).print_pretty();
-        table->query_equals( "tag", "time_total" ).print_pretty();
+        table->query_rows_equals( "tag", "time_solver" ).print_pretty();
+        table->query_rows_equals( "tag", "time_total" ).print_pretty();
     }
 
     return 0;

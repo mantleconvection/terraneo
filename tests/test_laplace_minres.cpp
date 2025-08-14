@@ -241,6 +241,6 @@ int main( int argc, char** argv )
         prev_l2_error = l2_error;
     }
 
-    table->query_not_none( "order" ).select( { "level", "order" } ).print_pretty();
-    table->query_not_none( "dofs" ).select( { "level", "dofs", "l2_error" } ).print_pretty();
+    table->query_rows_not_none( "order" ).select_columns( { "level", "order" } ).print_pretty();
+    table->query_rows_not_none( "dofs" ).select_columns( { "level", "dofs", "l2_error" } ).print_pretty();
 }

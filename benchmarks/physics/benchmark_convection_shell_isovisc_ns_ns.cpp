@@ -447,7 +447,7 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
 
         // assign( u, 0.0 );
 
-        table->query_equals( "tag", "pbicgstab_solver" ).print_pretty();
+        table->query_rows_equals( "tag", "pbicgstab_solver" ).print_pretty();
         table->clear();
 
         // "Normalize" pressure.
@@ -481,7 +481,7 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
         // Solve energy.
         solve( energy_solver, A, T, q );
 
-        table->query_equals( "tag", "pbicgstab_solver" ).print_pretty();
+        table->query_rows_equals( "tag", "pbicgstab_solver" ).print_pretty();
         table->clear();
 
         // Output stuff, logging etc.
