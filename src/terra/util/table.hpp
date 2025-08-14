@@ -74,9 +74,15 @@ namespace terra::util {
 class Table
 {
   public:
+    /// @brief Max length of string values (required for safe reading of possibly non-null-terminated char arrays).
+    static constexpr int MAX_STRING_LENGTH = 10000;
+
     /// @brief Type for table cell values.
     using Value = std::variant<
         std::monostate,
+        std::string,
+        const char*,
+        char*,
         char,
         short,
         int,
@@ -89,8 +95,7 @@ class Table
         unsigned long long,
         float,
         double,
-        bool,
-        std::string >;
+        bool >;
 
     /// @brief Type for a table row (mapping column name to value).
     using Row = std::unordered_map< std::string, Value >;
@@ -121,7 +126,7 @@ class Table
             columns_.insert( key );
         }
 
-        rows_.emplace_back( std::move( row ) );
+        rows_.emplace_back( row );
     }
 
     /// @brief Select a subset of columns from the table.
@@ -282,7 +287,8 @@ class Table
                     os << ",";
                 }
                 os << "\"" << key << "\":";
-                if ( std::holds_alternative< std::string >( val ) )
+                if ( std::holds_alternative< std::string >( val ) || std::holds_alternative< const char* >( val ) ||
+                     std::holds_alternative< char* >( val ) )
                 {
                     os << "\"" << value_to_string( val ) << "\"";
                 }
@@ -352,19 +358,19 @@ class Table
                 {
                     return val;
                 }
+                else if constexpr ( std::is_same_v< T, const char* > || std::is_same_v< T, char* > )
+                {
+                    return char_ptr_to_string_safe( val );
+                }
                 else if constexpr ( std::is_same_v< T, bool > )
                 {
                     return val ? "true" : "false";
                 }
-                else if constexpr ( std::is_same_v< T, double > )
+                else if constexpr ( std::is_same_v< T, float > || std::is_same_v< T, double > )
                 {
                     std::ostringstream ss;
                     ss << std::scientific << std::setprecision( 3 ) << val;
                     return ss.str();
-                }
-                else if constexpr ( std::is_same_v< T, std::string > )
-                {
-                    return val;
                 }
                 else
                 {
@@ -425,6 +431,18 @@ class Table
             first = false;
         }
         os << "\n";
+    }
+
+    /// @brief Safely converts const char * to string, even if not null terminated (constant max string length of MAX_STRING_LENGTH).
+    static std::string char_ptr_to_string_safe( const char* val )
+    {
+        if ( !val )
+        {
+            return std::string{};
+        }
+
+        std::size_t len = strnlen( val, MAX_STRING_LENGTH ); // find '\0' but stop at MAX_LEN
+        return std::string( val, len );
     }
 };
 

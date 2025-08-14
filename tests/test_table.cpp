@@ -85,6 +85,7 @@ int main( int argc, char** argv )
     table.print_jsonl();
     std::cout << "\nCSV:\n";
     table.print_csv();
+    std::cout << "\n\n";
 
     // Check JSONL output
     std::stringstream jsonl_ss;
