@@ -1,5 +1,8 @@
 
 
+#include <fstream>
+#include <vector>
+
 #include "communication/shell/communication.hpp"
 #include "fe/strong_algebraic_dirichlet_enforcement.hpp"
 #include "fe/wedge/integrands.hpp"
@@ -21,9 +24,10 @@
 #include "linalg/solvers/pbicgstab.hpp"
 #include "linalg/solvers/pcg.hpp"
 #include "linalg/vector_q1isoq2_q1.hpp"
+#include "shell/radial_profiles.hpp"
 #include "util/init.hpp"
 #include "util/table.hpp"
-#include "vtk/vtk.hpp"
+#include "visualization/xdmf.hpp"
 
 using namespace terra;
 
@@ -57,7 +61,7 @@ struct Parameters
     int num_vcycles;
     int num_smoothing_steps_prepost;
 
-    bool vtk;
+    bool xdmf;
 };
 
 struct InitialConditionInterpolator
@@ -85,7 +89,11 @@ struct InitialConditionInterpolator
         {
             const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
 
-            data_( local_subdomain_id, x, y, r ) = 2.0 * ( 1.0 - coords.norm() );
+            const double radius = coords.norm();
+            const double perturbation =
+                ( 0.5 - radius ) * ( 1.0 - radius ) * 0.5 * Kokkos::sin( 10.0 * coords( 0 ) + 3.0 * coords( 1 ) );
+
+            data_( local_subdomain_id, x, y, r ) = Kokkos::pow( 2.0 * ( 1.0 - coords.norm() ), 5 ) + perturbation;
         }
     }
 };
@@ -400,24 +408,20 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
     table->print_pretty();
     table->clear();
 
-    vtk::VTKOutput vtk_fine( coords_shell[velocity_level], coords_radii[velocity_level], false );
-    vtk::VTKOutput vtk_coarse( coords_shell[pressure_level], coords_radii[pressure_level], false );
+    visualization::XDMFOutput xdmf_output( "xdmf", coords_shell[velocity_level], coords_radii[velocity_level] );
 
-    vtk_fine.add_vector_field( u.block_1().grid_data() );
-    vtk_coarse.add_scalar_field( u.block_2().grid_data() );
-
-    vtk_fine.add_vector_field( f.block_1().grid_data() );
-    vtk_coarse.add_scalar_field( f.block_2().grid_data() );
-
-    vtk_fine.add_scalar_field( T.grid_data() );
+    xdmf_output.add( T.grid_data() );
 
     // Time stepping
 
-    if ( prm.vtk )
+    if ( prm.xdmf )
     {
-        vtk_fine.write(
-            "benchmark_convection_shell_isovisc_ns_ns_velocity_temperature_" + std::to_string( 0 ) + ".vtu" );
-        vtk_coarse.write( "benchmark_convection_shell_isovisc_ns_ns_pressure_" + std::to_string( 0 ) + ".vtu" );
+        xdmf_output.write();
+
+        auto profiles = shell::radial_profiles_to_table(
+            shell::radial_profiles( T ), domains[velocity_level].domain_info().radii() );
+        std::ofstream out( "radial_profiles_" + std::to_string( 0 ) + ".csv" );
+        profiles.print_csv( out );
     }
 
     double simulated_time = 0.0;
@@ -488,13 +492,13 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
 
         table->add_row( {} );
 
-        if ( prm.vtk )
+        if ( prm.xdmf )
         {
-            vtk_fine.write(
-                "benchmark_convection_shell_isovisc_ns_ns_velocity_temperature_" + std::to_string( timestep ) +
-                ".vtu" );
-            vtk_coarse.write(
-                "benchmark_convection_shell_isovisc_ns_ns_pressure_" + std::to_string( timestep ) + ".vtu" );
+            xdmf_output.write();
+            auto profiles = shell::radial_profiles_to_table(
+                shell::radial_profiles( T ), domains[velocity_level].domain_info().radii() );
+            std::ofstream out( "radial_profiles_" + std::to_string( timestep ) + ".csv" );
+            profiles.print_csv( out );
         }
 
         simulated_time += prm.dt;
@@ -507,23 +511,23 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
 
 int main( int argc, char** argv )
 {
-    util::TerraScopeGuard scope_guard( &argc, &argv );
+    util::terra_initialize( &argc, &argv );
 
     const auto table = std::make_shared< util::Table >();
 
     constexpr Parameters parameters{
         .min_level                   = 0,
-        .max_level                   = 4,
+        .max_level                   = 7,
         .r_min                       = 0.5,
         .r_max                       = 1.0,
-        .diffusivity                 = 1e-2,
-        .rayleigh                    = 1e4,
-        .dt                          = 1e-1,
+        .diffusivity                 = 1.0,
+        .rayleigh                    = 1e6,
+        .dt                          = 1e-2,
         .t_end                       = 1000.0,
         .max_timesteps               = 1000,
-        .num_vcycles                 = 1,
-        .num_smoothing_steps_prepost = 1,
-        .vtk                         = true };
+        .num_vcycles                 = 2,
+        .num_smoothing_steps_prepost = 2,
+        .xdmf                        = true };
 
     run( parameters, table );
 
