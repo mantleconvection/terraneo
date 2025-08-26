@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include "mpi/mpi.hpp"
 #include "util/xml.hpp"
 
 namespace terra::visualization {
@@ -26,7 +27,6 @@ template < typename InputGridScalarType >
 class XDMFOutput
 {
   public:
-
     /// @brief Used to specify the output type when writing floating point data.
     ///
     /// Values are the number of bytes.
@@ -112,9 +112,6 @@ class XDMFOutput
     /// added) to avoid frequent reallocation.
     void write()
     {
-        Kokkos::abort(
-            "collect total number of nodes on root to write correctly into xml files - currently hardcoded for a quick test." );
-
         using util::XML;
 
         const auto geometry_file_base = "geometry.bin";
@@ -135,6 +132,13 @@ class XDMFOutput
 
         if ( write_counter_ == 0 )
         {
+            // Number of global nodes and elements.
+
+            int num_nodes_elements_global[2] = { number_of_nodes_local, number_of_elements_local };
+            MPI_Allreduce( MPI_IN_PLACE, &num_nodes_elements_global, 2, MPI_INT, MPI_SUM, MPI_COMM_WORLD );
+            number_of_nodes_global_    = num_nodes_elements_global[0];
+            number_of_elements_global_ = num_nodes_elements_global[1];
+
             // Check MPI write offset
 
             // To be populated:
@@ -163,7 +167,7 @@ class XDMFOutput
 
             // Node points.
             {
-                std::stringstream geometry_stream( geometry_file_path, std::ios::binary );
+                std::stringstream geometry_stream;
                 switch ( output_type_points_ )
                 {
                 case OutputTypeFloat::Float32:
@@ -178,24 +182,17 @@ class XDMFOutput
 
                 MPI_File fh;
                 MPI_File_open(
-                    MPI_COMM_WORLD,
-                    geometry_file_path.c_str(),
-                    MPI_MODE_CREATE | MPI_MODE_WRONLY | MPI_MODE_RDWR,
-                    MPI_INFO_NULL,
-                    &fh );
+                    MPI_COMM_WORLD, geometry_file_path.c_str(), MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &fh );
 
                 // Define the file view: each process writes its local data sequentially
                 MPI_Offset disp = number_of_nodes_offset_ * 3 * static_cast< int >( output_type_points_ );
-                std::cout << "rank " << mpi::rank() << " offset geometry: " << disp << std::endl;
                 MPI_File_set_view( fh, disp, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL );
+
+                std::string geom_str = geometry_stream.str();
 
                 // Write data collectively
                 MPI_File_write_all(
-                    fh,
-                    geometry_stream.str().data(),
-                    static_cast< int >( geometry_stream.str().size() ),
-                    MPI_CHAR,
-                    MPI_STATUS_IGNORE );
+                    fh, geom_str.data(), static_cast< int >( geom_str.size() ), MPI_CHAR, MPI_STATUS_IGNORE );
 
                 // Close the file
                 MPI_File_close( &fh );
@@ -203,14 +200,14 @@ class XDMFOutput
 
             // Connectivity/topology/elements (whatever you want to call it).
             {
-                std::stringstream topology_stream( topology_file_path, std::ios::binary );
+                std::stringstream topology_stream;
                 switch ( output_type_connectivity_ )
                 {
                 case OutputTypeInt::Int32:
-                    write_topology_binary_data< int32_t >( topology_stream );
+                    write_topology_binary_data< int32_t >( topology_stream, number_of_nodes_offset_ );
                     break;
                 case OutputTypeInt::Int64:
-                    write_topology_binary_data< int64_t >( topology_stream );
+                    write_topology_binary_data< int64_t >( topology_stream, number_of_nodes_offset_ );
                     break;
                 default:
                     Kokkos::abort( "XDMF: Unknown output type for topology." );
@@ -218,24 +215,17 @@ class XDMFOutput
 
                 MPI_File fh;
                 MPI_File_open(
-                    MPI_COMM_WORLD,
-                    topology_file_path.c_str(),
-                    MPI_MODE_CREATE | MPI_MODE_WRONLY | MPI_MODE_RDWR,
-                    MPI_INFO_NULL,
-                    &fh );
+                    MPI_COMM_WORLD, topology_file_path.c_str(), MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &fh );
 
                 // Define the file view: each process writes its local data sequentially
-                MPI_Offset disp = number_of_elements_offset_ * static_cast< int >( output_type_connectivity_ );
-                std::cout << "rank " << mpi::rank() << " offset connectivity: " << disp << std::endl;
+                MPI_Offset disp = 6 * number_of_elements_offset_ * static_cast< int >( output_type_connectivity_ );
                 MPI_File_set_view( fh, disp, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL );
+
+                std::string topo_str = topology_stream.str();
 
                 // Write data collectively
                 MPI_File_write_all(
-                    fh,
-                    topology_stream.str().data(),
-                    static_cast< int >( topology_stream.str().size() ),
-                    MPI_CHAR,
-                    MPI_STATUS_IGNORE );
+                    fh, topo_str.data(), static_cast< int >( topo_str.size() ), MPI_CHAR, MPI_STATUS_IGNORE );
 
                 // Close the file
                 MPI_File_close( &fh );
@@ -256,21 +246,21 @@ class XDMFOutput
                            { "DataType", "Float" },
                            { "Precision", std::to_string( static_cast< int >( output_type_points_ ) ) },
                            { "Endian", "Little" },
-                           { "Dimensions", std::to_string( 2 * number_of_nodes_local ) + " " + std::to_string( 3 ) } },
+                           { "Dimensions", std::to_string( number_of_nodes_global_ ) + " " + std::to_string( 3 ) } },
                          geometry_file_base ) );
 
         grid.add_child( geometry );
 
         auto topology =
             XML( "Topology",
-                 { { "Type", "Wedge" }, { "NumberOfElements", std::to_string( 2 * number_of_elements_local ) } } )
+                 { { "Type", "Wedge" }, { "NumberOfElements", std::to_string( number_of_elements_global_ ) } } )
                 .add_child(
                     XML( "DataItem",
                          { { "Format", "Binary" },
                            { "DataType", "Int" },
                            { "Precision", std::to_string( static_cast< int >( output_type_connectivity_ ) ) },
                            { "Endian", "Little" },
-                           { "Dimensions", std::to_string( 2 * number_of_elements_local * 6 ) } },
+                           { "Dimensions", std::to_string( number_of_elements_global_ * 6 ) } },
                          topology_file_base ) );
 
         grid.add_child( topology );
@@ -282,17 +272,35 @@ class XDMFOutput
             const auto attribute_file_base = data.label() + "_" + std::to_string( write_counter_ ) + ".bin";
             const auto attribute_file_path = directory_path_ + "/" + attribute_file_base;
 
-            std::ofstream attribute_stream( attribute_file_path, std::ios::binary );
-            switch ( output_type )
             {
-            case OutputTypeFloat::Float32:
-                write_scalar_attribute_binary_data< double, float >( data, attribute_stream );
-                break;
-            case OutputTypeFloat::Float64:
-                write_scalar_attribute_binary_data< double, double >( data, attribute_stream );
-                break;
+                std::stringstream attribute_stream;
+                switch ( output_type )
+                {
+                case OutputTypeFloat::Float32:
+                    write_scalar_attribute_binary_data< double, float >( data, attribute_stream );
+                    break;
+                case OutputTypeFloat::Float64:
+                    write_scalar_attribute_binary_data< double, double >( data, attribute_stream );
+                    break;
+                }
+
+                MPI_File fh;
+                MPI_File_open(
+                    MPI_COMM_WORLD, attribute_file_path.c_str(), MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &fh );
+
+                // Define the file view: each process writes its local data sequentially
+                MPI_Offset disp = number_of_nodes_offset_ * static_cast< int >( output_type_points_ );
+                MPI_File_set_view( fh, disp, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL );
+
+                std::string attr_str = attribute_stream.str();
+
+                // Write data collectively
+                MPI_File_write_all(
+                    fh, attr_str.data(), static_cast< int >( attr_str.size() ), MPI_CHAR, MPI_STATUS_IGNORE );
+
+                // Close the file
+                MPI_File_close( &fh );
             }
-            attribute_stream.close();
 
             auto attribute =
                 XML( "Attribute", { { "Name", data.label() }, { "AttributeType", "Scalar" }, { "Center", "Node" } } )
@@ -302,10 +310,10 @@ class XDMFOutput
                                { "DataType", "Float" },
                                { "Precision", std::to_string( static_cast< int >( output_type ) ) },
                                { "Endian", "Little" },
-                               { "Dimensions", std::to_string( number_of_nodes_local ) } },
+                               { "Dimensions", std::to_string( number_of_nodes_global_ ) } },
                              attribute_file_base ) );
 
-            // grid.add_child( attribute );
+            grid.add_child( attribute );
         }
 
         domain.add_child( grid );
@@ -355,7 +363,7 @@ class XDMFOutput
     }
 
     template < std::integral IntegerOutputType >
-    void write_topology_binary_data( std::stringstream& out )
+    void write_topology_binary_data( std::stringstream& out, IntegerOutputType number_of_nodes_offset )
     {
         const int num_subdomains = coords_shell_device_.extent( 0 );
         const int nodes_x        = coords_shell_device_.extent( 1 );
@@ -377,12 +385,13 @@ class XDMFOutput
                         // Hex nodes
                         IntegerOutputType v[8];
 
-                        v[0] = local_subdomain_id * stride_0 + r * stride_1 + y * stride_2 + x;
+                        v[0] = number_of_nodes_offset + local_subdomain_id * stride_0 + r * stride_1 + y * stride_2 + x;
                         v[1] = v[0] + 1;
                         v[2] = v[0] + nodes_x;
                         v[3] = v[0] + nodes_x + 1;
 
-                        v[4] = local_subdomain_id * stride_0 + ( r + 1 ) * stride_1 + y * stride_2 + x;
+                        v[4] = number_of_nodes_offset + local_subdomain_id * stride_0 + ( r + 1 ) * stride_1 +
+                               y * stride_2 + x;
                         v[5] = v[4] + 1;
                         v[6] = v[4] + nodes_x;
                         v[7] = v[4] + nodes_x + 1;
@@ -401,7 +410,7 @@ class XDMFOutput
     template < typename ScalarTypeIn, typename ScalarTypeOut >
     void write_scalar_attribute_binary_data(
         const grid::Grid4DDataScalar< ScalarTypeIn >& device_data,
-        std::ofstream&                                out )
+        std::stringstream&                            out )
     {
         // Copy data to host.
         if constexpr ( std::is_same_v< ScalarTypeIn, double > )
@@ -454,6 +463,9 @@ class XDMFOutput
 
     int number_of_nodes_offset_    = -1;
     int number_of_elements_offset_ = -1;
+
+    int number_of_nodes_global_    = -1;
+    int number_of_elements_global_ = -1;
 };
 
 } // namespace terra::visualization

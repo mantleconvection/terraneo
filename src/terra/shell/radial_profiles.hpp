@@ -97,7 +97,7 @@ RadialProfiles< ScalarType > radial_profiles( const linalg::VectorQ1Scalar< Scal
     Kokkos::fence();
 
     MPI_Allreduce(
-        radial_profiles.radial_min_.data(),
+        MPI_IN_PLACE,
         radial_profiles.radial_min_.data(),
         radial_profiles.radial_min_.size(),
         mpi::mpi_datatype< ScalarType >(),
@@ -105,7 +105,7 @@ RadialProfiles< ScalarType > radial_profiles( const linalg::VectorQ1Scalar< Scal
         MPI_COMM_WORLD );
 
     MPI_Allreduce(
-        radial_profiles.radial_max_.data(),
+        MPI_IN_PLACE,
         radial_profiles.radial_max_.data(),
         radial_profiles.radial_max_.size(),
         mpi::mpi_datatype< ScalarType >(),
@@ -113,7 +113,7 @@ RadialProfiles< ScalarType > radial_profiles( const linalg::VectorQ1Scalar< Scal
         MPI_COMM_WORLD );
 
     MPI_Allreduce(
-        radial_profiles.radial_sum_.data(),
+        MPI_IN_PLACE,
         radial_profiles.radial_sum_.data(),
         radial_profiles.radial_sum_.size(),
         mpi::mpi_datatype< ScalarType >(),
@@ -121,7 +121,7 @@ RadialProfiles< ScalarType > radial_profiles( const linalg::VectorQ1Scalar< Scal
         MPI_COMM_WORLD );
 
     MPI_Allreduce(
-        radial_profiles.radial_cnt_.data(),
+        MPI_IN_PLACE,
         radial_profiles.radial_cnt_.data(),
         radial_profiles.radial_cnt_.size(),
         mpi::mpi_datatype< ScalarType >(),

@@ -103,7 +103,18 @@ inline mpi::MPIRank subdomain_to_rank_all_root( const SubdomainInfo& subdomain_i
 
 inline mpi::MPIRank subdomain_to_rank_distribute_full_diamonds( const SubdomainInfo& subdomain_info )
 {
-    return subdomain_info.diamond_id() % mpi::num_processes();
+    const auto n = mpi::num_processes();
+
+    const int size      = 10 / n;
+    const int remainder = 10 % n;
+    const int d         = subdomain_info.diamond_id();
+
+    if ( d < ( size + 1 ) * remainder )
+    {
+        return d / ( size + 1 );
+    }
+
+    return remainder + ( d - ( size + 1 ) * remainder ) / size;
 }
 
 /// @brief Information about the thick spherical shell mesh.

@@ -38,12 +38,37 @@ struct SomeInterpolator
     double t_;
 };
 
+struct RankInterpolator
+{
+    terra::grid::Grid3DDataVec< double, 3 > shell_coords_;
+    terra::grid::Grid2DDataScalar< double > radii_;
+    terra::grid::Grid4DDataScalar< double > scalar_data_;
+
+    RankInterpolator(
+        const terra::grid::Grid3DDataVec< double, 3 >& shell_coords,
+        const terra::grid::Grid2DDataScalar< double >& radii,
+        const terra::grid::Grid4DDataScalar< double >& scalar_data )
+    : shell_coords_( shell_coords )
+    , radii_( radii )
+    , scalar_data_( scalar_data )
+    , rank_( terra::mpi::rank() )
+    {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()( const int subdomain, const int x, const int y, const int r ) const
+    {
+        scalar_data_( subdomain, x, y, r ) = static_cast< double >( rank_ );
+    }
+
+    int rank_;
+};
+
 int main( int argc, char** argv )
 {
     terra::util::terra_initialize( &argc, &argv );
 
-    constexpr int    lateral_refinement_level = 6;
-    constexpr int    radial_refinement_level  = 6;
+    constexpr int    lateral_refinement_level = 4;
+    constexpr int    radial_refinement_level  = 4;
     constexpr double r_min                    = 0.5;
     constexpr double r_max                    = 1.0;
 
@@ -58,18 +83,24 @@ int main( int argc, char** argv )
     const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
 
     auto data = terra::grid::shell::allocate_scalar_grid< double >( "scalar_data", domain );
-
-    std::cout << data.span() << std::endl;
+    auto rank = terra::grid::shell::allocate_scalar_grid< double >( "rank_data", domain );
 
     terra::visualization::XDMFOutput xdmf( "out", subdomain_shell_coords, subdomain_radii );
     xdmf.add( data );
+    xdmf.add( rank );
 
-    for ( int i = 0; i < 100; ++i )
+    Kokkos::parallel_for(
+        "rank_interpolation",
+        terra::grid::shell::local_domain_md_range_policy_nodes( domain ),
+        RankInterpolator( subdomain_shell_coords, subdomain_radii, rank ) );
+
+    for ( int i = 0; i < 5; ++i )
     {
         Kokkos::parallel_for(
             "some_interpolation",
             terra::grid::shell::local_domain_md_range_policy_nodes( domain ),
             SomeInterpolator( subdomain_shell_coords, subdomain_radii, data, 0.1 * i ) );
+
         xdmf.write();
     }
 

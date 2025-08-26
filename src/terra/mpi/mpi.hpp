@@ -97,7 +97,16 @@ class MPIContext
         return guard;
     }
 };
+
 } // namespace detail
+
+inline std::string mpi_error_string( int err )
+{
+    char errstr[MPI_MAX_ERROR_STRING];
+    int  len = 0;
+    MPI_Error_string( err, errstr, &len );
+    return { errstr, static_cast< size_t >( len ) };
+}
 
 template < typename T >
 MPI_Datatype mpi_datatype()
