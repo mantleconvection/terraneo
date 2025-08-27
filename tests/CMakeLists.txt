@@ -36,6 +36,7 @@ function(add_terra_test name)
 endfunction()
 
 # Adding all the tests.
+add_terra_test(test_arg_parser)
 add_terra_test(test_debug_assembly)
 add_terra_test(test_flag_field_unique_vertices)
 add_terra_test(test_heat_eq)
