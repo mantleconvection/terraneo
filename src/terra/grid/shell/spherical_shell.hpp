@@ -14,6 +14,25 @@ namespace terra::grid::shell {
 
 std::vector< double > uniform_shell_radii( double r_min, double r_max, int num_shells );
 
+inline double min_radial_h( const std::vector< double >& shell_radii )
+{
+    if ( shell_radii.size() < 2 )
+    {
+        throw std::runtime_error( " Need at least two shells to compute h. " );
+    }
+
+    double min_dist = std::numeric_limits< double >::infinity();
+    for ( size_t i = 1; i < shell_radii.size(); ++i )
+    {
+        double d = std::abs( shell_radii[i] - shell_radii[i - 1] );
+        if ( d < min_dist )
+        {
+            min_dist = d;
+        }
+    }
+    return min_dist;
+}
+
 /// @brief (Sortable) Identifier for a single subdomain of a diamond.
 ///
 /// Carries the diamond ID, and the subdomain index (x, y, r) inside the diamond.
