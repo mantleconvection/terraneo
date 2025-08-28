@@ -17,11 +17,11 @@ class Jacobi
 {
   public:
     /// @brief Operator type to be solved.
-    using OperatorType       = OperatorT;
+    using OperatorType = OperatorT;
     /// @brief Solution vector type.
     using SolutionVectorType = SrcOf< OperatorType >;
     /// @brief Right-hand side vector type.
-    using RHSVectorType      = DstOf< OperatorType >;
+    using RHSVectorType = DstOf< OperatorType >;
 
     /// @brief Scalar type for computations.
     using ScalarType = SolutionVectorType::ScalarType;
@@ -35,7 +35,7 @@ class Jacobi
         const SolutionVectorType& inverse_diagonal,
         const int                 iterations,
         const SolutionVectorType& tmp,
-        const double              omega = 1.0 )
+        const ScalarType          omega = 1.0 )
     : inverse_diagonal_( inverse_diagonal )
     , iterations_( iterations )
     , tmp_( tmp )
@@ -62,7 +62,7 @@ class Jacobi
     SolutionVectorType inverse_diagonal_; ///< Inverse diagonal vector.
     int                iterations_;       ///< Number of iterations.
     SolutionVectorType tmp_;              ///< Temporary workspace vector.
-    double             omega_;            ///< Relaxation parameter.
+    ScalarType         omega_;            ///< Relaxation parameter.
 };
 
 /// @brief Static assertion: Jacobi satisfies SolverLike concept.

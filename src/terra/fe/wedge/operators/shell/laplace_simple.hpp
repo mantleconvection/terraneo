@@ -17,15 +17,15 @@ template < typename ScalarT >
 class LaplaceSimple
 {
   public:
-    using SrcVectorType = linalg::VectorQ1Scalar< double >;
-    using DstVectorType = linalg::VectorQ1Scalar< double >;
+    using SrcVectorType = linalg::VectorQ1Scalar< ScalarT >;
+    using DstVectorType = linalg::VectorQ1Scalar< ScalarT >;
     using ScalarType    = ScalarT;
 
   private:
     grid::shell::DistributedDomain domain_;
 
-    grid::Grid3DDataVec< double, 3 > grid_;
-    grid::Grid2DDataScalar< double > radii_;
+    grid::Grid3DDataVec< ScalarT, 3 > grid_;
+    grid::Grid2DDataScalar< ScalarT > radii_;
 
     bool treat_boundary_;
     bool diagonal_;
@@ -33,21 +33,21 @@ class LaplaceSimple
     linalg::OperatorApplyMode         operator_apply_mode_;
     linalg::OperatorCommunicationMode operator_communication_mode_;
 
-    communication::shell::SubdomainNeighborhoodSendRecvBuffer< double > send_buffers_;
-    communication::shell::SubdomainNeighborhoodSendRecvBuffer< double > recv_buffers_;
+    communication::shell::SubdomainNeighborhoodSendRecvBuffer< ScalarT > send_buffers_;
+    communication::shell::SubdomainNeighborhoodSendRecvBuffer< ScalarT > recv_buffers_;
 
     grid::Grid4DDataScalar< ScalarType > src_;
     grid::Grid4DDataScalar< ScalarType > dst_;
 
   public:
     LaplaceSimple(
-        const grid::shell::DistributedDomain&   domain,
-        const grid::Grid3DDataVec< double, 3 >& grid,
-        const grid::Grid2DDataScalar< double >& radii,
-        bool                                    treat_boundary,
-        bool                                    diagonal,
-        linalg::OperatorApplyMode               operator_apply_mode = linalg::OperatorApplyMode::Replace,
-        linalg::OperatorCommunicationMode       operator_communication_mode =
+        const grid::shell::DistributedDomain&    domain,
+        const grid::Grid3DDataVec< ScalarT, 3 >& grid,
+        const grid::Grid2DDataScalar< ScalarT >& radii,
+        bool                                     treat_boundary,
+        bool                                     diagonal,
+        linalg::OperatorApplyMode                operator_apply_mode = linalg::OperatorApplyMode::Replace,
+        linalg::OperatorCommunicationMode        operator_communication_mode =
             linalg::OperatorCommunicationMode::CommunicateAdditively )
     : domain_( domain )
     , grid_( grid )
@@ -96,24 +96,24 @@ class LaplaceSimple
         operator()( const int local_subdomain_id, const int x_cell, const int y_cell, const int r_cell ) const
     {
         // Gather surface points for each wedge.
-        dense::Vec< double, 3 > wedge_phy_surf[num_wedges_per_hex_cell][num_nodes_per_wedge_surface] = {};
+        dense::Vec< ScalarT, 3 > wedge_phy_surf[num_wedges_per_hex_cell][num_nodes_per_wedge_surface] = {};
         wedge_surface_physical_coords( wedge_phy_surf, grid_, local_subdomain_id, x_cell, y_cell );
 
         // Gather wedge radii.
-        const double r_1 = radii_( local_subdomain_id, r_cell );
-        const double r_2 = radii_( local_subdomain_id, r_cell + 1 );
+        const ScalarT r_1 = radii_( local_subdomain_id, r_cell );
+        const ScalarT r_2 = radii_( local_subdomain_id, r_cell + 1 );
 
         // Quadrature points.
         constexpr auto num_quad_points = quadrature::quad_felippa_3x2_num_quad_points;
 
-        dense::Vec< double, 3 > quad_points[num_quad_points];
-        double                  quad_weights[num_quad_points];
+        dense::Vec< ScalarT, 3 > quad_points[num_quad_points];
+        ScalarT                  quad_weights[num_quad_points];
 
         quadrature::quad_felippa_3x2_quad_points( quad_points );
         quadrature::quad_felippa_3x2_quad_weights( quad_weights );
 
         // Compute the local element matrix.
-        dense::Mat< double, 6, 6 > A[num_wedges_per_hex_cell] = {};
+        dense::Mat< ScalarT, 6, 6 > A[num_wedges_per_hex_cell] = {};
 
         for ( int q = 0; q < num_quad_points; q++ )
         {
@@ -144,7 +144,7 @@ class LaplaceSimple
         {
             for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
             {
-                dense::Mat< double, 6, 6 > boundary_mask;
+                dense::Mat< ScalarT, 6, 6 > boundary_mask;
                 boundary_mask.fill( 1.0 );
                 if ( r_cell == 0 )
                 {
@@ -186,10 +186,10 @@ class LaplaceSimple
             A[1] = A[1].diagonal();
         }
 
-        dense::Vec< double, 6 > src[num_wedges_per_hex_cell];
+        dense::Vec< ScalarT, 6 > src[num_wedges_per_hex_cell];
         extract_local_wedge_scalar_coefficients( src, local_subdomain_id, x_cell, y_cell, r_cell, src_ );
 
-        dense::Vec< double, 6 > dst[num_wedges_per_hex_cell];
+        dense::Vec< ScalarT, 6 > dst[num_wedges_per_hex_cell];
 
         dst[0] = A[0] * src[0];
         dst[1] = A[1] * src[1];
@@ -198,6 +198,7 @@ class LaplaceSimple
     }
 };
 
+static_assert( linalg::OperatorLike< LaplaceSimple< float > > );
 static_assert( linalg::OperatorLike< LaplaceSimple< double > > );
 
 } // namespace terra::fe::wedge::operators::shell

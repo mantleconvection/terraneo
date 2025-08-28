@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include <fstream>
+
 #include "mpi/mpi.hpp"
 #include "util/xml.hpp"
 
@@ -71,31 +73,24 @@ class XDMFOutput
     /// @brief Adds a new data grid to be written out.
     ///
     /// Does not write any data to file.
+    template < typename InputScalarDataType >
     void
-        add( const grid::Grid4DDataScalar< double >& data,
-             const OutputTypeFloat                   output_type = OutputTypeFloat::Float32 )
+        add( const grid::Grid4DDataScalar< InputScalarDataType >& data,
+             const OutputTypeFloat                                output_type = OutputTypeFloat::Float32 )
     {
-        if ( data.extent( 0 ) != coords_radii_device_.extent( 0 ) )
+        check_extents( data );
+        if constexpr ( std::is_same_v< InputScalarDataType, double > )
         {
-            Kokkos::abort( "XDMF: Number of subdomains of added data item does not match mesh." );
+            device_data_views_scalar_double_.push_back( { data, output_type } );
         }
-
-        if ( data.extent( 1 ) != coords_shell_device_.extent( 1 ) )
+        else if constexpr ( std::is_same_v< InputScalarDataType, float > )
         {
-            Kokkos::abort( "XDMF: Dim x of added data item does not match mesh." );
+            device_data_views_scalar_float_.push_back( { data, output_type } );
         }
-
-        if ( data.extent( 2 ) != coords_shell_device_.extent( 2 ) )
+        else
         {
-            Kokkos::abort( "XDMF: Dim y of added data item does not match mesh." );
+            Kokkos::abort( "XDMF::add(): Grid data type not supported (yet)." );
         }
-
-        if ( data.extent( 3 ) != coords_radii_device_.extent( 1 ) )
-        {
-            Kokkos::abort( "XDMF: Dim r of added data item does not match mesh." );
-        }
-
-        device_data_views_scalar_double_.push_back( { data, output_type } );
     }
 
     /// @brief Writes a "time step".
@@ -267,52 +262,15 @@ class XDMFOutput
 
         // Write attribute data for each attached grid.
 
+        for ( const auto& [data, output_type] : device_data_views_scalar_float_ )
+        {
+            const auto attribute = write_scalar_attribute_file( data, output_type );
+            grid.add_child( attribute );
+        }
+
         for ( const auto& [data, output_type] : device_data_views_scalar_double_ )
         {
-            const auto attribute_file_base = data.label() + "_" + std::to_string( write_counter_ ) + ".bin";
-            const auto attribute_file_path = directory_path_ + "/" + attribute_file_base;
-
-            {
-                std::stringstream attribute_stream;
-                switch ( output_type )
-                {
-                case OutputTypeFloat::Float32:
-                    write_scalar_attribute_binary_data< double, float >( data, attribute_stream );
-                    break;
-                case OutputTypeFloat::Float64:
-                    write_scalar_attribute_binary_data< double, double >( data, attribute_stream );
-                    break;
-                }
-
-                MPI_File fh;
-                MPI_File_open(
-                    MPI_COMM_WORLD, attribute_file_path.c_str(), MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &fh );
-
-                // Define the file view: each process writes its local data sequentially
-                MPI_Offset disp = number_of_nodes_offset_ * static_cast< int >( output_type_points_ );
-                MPI_File_set_view( fh, disp, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL );
-
-                std::string attr_str = attribute_stream.str();
-
-                // Write data collectively
-                MPI_File_write_all(
-                    fh, attr_str.data(), static_cast< int >( attr_str.size() ), MPI_CHAR, MPI_STATUS_IGNORE );
-
-                // Close the file
-                MPI_File_close( &fh );
-            }
-
-            auto attribute =
-                XML( "Attribute", { { "Name", data.label() }, { "AttributeType", "Scalar" }, { "Center", "Node" } } )
-                    .add_child(
-                        XML( "DataItem",
-                             { { "Format", "Binary" },
-                               { "DataType", "Float" },
-                               { "Precision", std::to_string( static_cast< int >( output_type ) ) },
-                               { "Endian", "Little" },
-                               { "Dimensions", std::to_string( number_of_nodes_global_ ) } },
-                             attribute_file_base ) );
-
+            const auto attribute = write_scalar_attribute_file( data, output_type );
             grid.add_child( attribute );
         }
 
@@ -332,16 +290,38 @@ class XDMFOutput
     }
 
   private:
+    template < typename GridDataType >
+    void check_extents( const GridDataType& data )
+    {
+        if ( data.extent( 0 ) != coords_radii_device_.extent( 0 ) )
+        {
+            Kokkos::abort( "XDMF: Number of subdomains of added data item does not match mesh." );
+        }
+
+        if ( data.extent( 1 ) != coords_shell_device_.extent( 1 ) )
+        {
+            Kokkos::abort( "XDMF: Dim x of added data item does not match mesh." );
+        }
+
+        if ( data.extent( 2 ) != coords_shell_device_.extent( 2 ) )
+        {
+            Kokkos::abort( "XDMF: Dim y of added data item does not match mesh." );
+        }
+
+        if ( data.extent( 3 ) != coords_radii_device_.extent( 1 ) )
+        {
+            Kokkos::abort( "XDMF: Dim r of added data item does not match mesh." );
+        }
+    }
+
     template < std::floating_point FloatingPointOutputType >
     void write_geometry_binary_data( std::stringstream& out )
     {
-        using GeometryInputType = double;
-
         // Copy mesh to host.
         // We assume the mesh is only written once so we throw away the host copies after this method returns.
-        const grid::Grid3DDataVec< GeometryInputType, 3 >::HostMirror coords_shell_host =
+        const typename grid::Grid3DDataVec< InputGridScalarType, 3 >::HostMirror coords_shell_host =
             Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace{}, coords_shell_device_ );
-        const grid::Grid2DDataScalar< GeometryInputType >::HostMirror coords_radii_host =
+        const typename grid::Grid2DDataScalar< InputGridScalarType >::HostMirror coords_radii_host =
             Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace{}, coords_radii_device_ );
 
         for ( int local_subdomain_id = 0; local_subdomain_id < coords_shell_host.extent( 0 ); local_subdomain_id++ )
@@ -425,28 +405,107 @@ class XDMFOutput
             }
 
             Kokkos::deep_copy( host_data_mirror_scalar_double_.value(), device_data );
+
+            const auto& host_data = host_data_mirror_scalar_double_.value();
+
+            for ( int local_subdomain_id = 0; local_subdomain_id < host_data.extent( 0 ); local_subdomain_id++ )
+            {
+                for ( int r = 0; r < host_data.extent( 3 ); r++ )
+                {
+                    for ( int y = 0; y < host_data.extent( 2 ); y++ )
+                    {
+                        for ( int x = 0; x < host_data.extent( 1 ); x++ )
+                        {
+                            const auto value = static_cast< ScalarTypeOut >( host_data( local_subdomain_id, x, y, r ) );
+                            out.write( reinterpret_cast< const char* >( &value ), sizeof( ScalarTypeOut ) );
+                        }
+                    }
+                }
+            }
+        }
+        else if constexpr ( std::is_same_v< ScalarTypeIn, float > )
+        {
+            if ( !host_data_mirror_scalar_float_.has_value() )
+            {
+                host_data_mirror_scalar_float_ = Kokkos::create_mirror_view( Kokkos::HostSpace{}, device_data );
+            }
+
+            Kokkos::deep_copy( host_data_mirror_scalar_float_.value(), device_data );
+
+            const auto& host_data = host_data_mirror_scalar_float_.value();
+
+            for ( int local_subdomain_id = 0; local_subdomain_id < host_data.extent( 0 ); local_subdomain_id++ )
+            {
+                for ( int r = 0; r < host_data.extent( 3 ); r++ )
+                {
+                    for ( int y = 0; y < host_data.extent( 2 ); y++ )
+                    {
+                        for ( int x = 0; x < host_data.extent( 1 ); x++ )
+                        {
+                            const auto value = static_cast< ScalarTypeOut >( host_data( local_subdomain_id, x, y, r ) );
+                            out.write( reinterpret_cast< const char* >( &value ), sizeof( ScalarTypeOut ) );
+                        }
+                    }
+                }
+            }
         }
         else
         {
             Kokkos::abort( "XDMF: Only double precision grids supported for scalar attributes." );
         }
+    }
 
-        const auto& host_data = host_data_mirror_scalar_double_.value();
+    template < typename GridData >
+    util::XML write_scalar_attribute_file( const GridData& data, const OutputTypeFloat& output_type )
+    {
+        using InputType = typename GridData::value_type;
 
-        for ( int local_subdomain_id = 0; local_subdomain_id < host_data.extent( 0 ); local_subdomain_id++ )
+        const auto attribute_file_base = data.label() + "_" + std::to_string( write_counter_ ) + ".bin";
+        const auto attribute_file_path = directory_path_ + "/" + attribute_file_base;
+
         {
-            for ( int r = 0; r < host_data.extent( 3 ); r++ )
+            std::stringstream attribute_stream;
+            switch ( output_type )
             {
-                for ( int y = 0; y < host_data.extent( 2 ); y++ )
-                {
-                    for ( int x = 0; x < host_data.extent( 1 ); x++ )
-                    {
-                        const auto value = static_cast< ScalarTypeOut >( host_data( local_subdomain_id, x, y, r ) );
-                        out.write( reinterpret_cast< const char* >( &value ), sizeof( ScalarTypeOut ) );
-                    }
-                }
+            case OutputTypeFloat::Float32:
+                write_scalar_attribute_binary_data< InputType, float >( data, attribute_stream );
+                break;
+            case OutputTypeFloat::Float64:
+                write_scalar_attribute_binary_data< InputType, double >( data, attribute_stream );
+                break;
             }
+
+            MPI_File fh;
+            MPI_File_open(
+                MPI_COMM_WORLD, attribute_file_path.c_str(), MPI_MODE_CREATE | MPI_MODE_RDWR, MPI_INFO_NULL, &fh );
+
+            // Define the file view: each process writes its local data sequentially
+            MPI_Offset disp = number_of_nodes_offset_ * static_cast< int >( output_type_points_ );
+            MPI_File_set_view( fh, disp, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL );
+
+            std::string attr_str = attribute_stream.str();
+
+            // Write data collectively
+            MPI_File_write_all(
+                fh, attr_str.data(), static_cast< int >( attr_str.size() ), MPI_CHAR, MPI_STATUS_IGNORE );
+
+            // Close the file
+            MPI_File_close( &fh );
         }
+
+        auto attribute =
+            util::XML( "Attribute", { { "Name", data.label() }, { "AttributeType", "Scalar" }, { "Center", "Node" } } )
+                .add_child(
+                    util::XML(
+                        "DataItem",
+                        { { "Format", "Binary" },
+                          { "DataType", "Float" },
+                          { "Precision", std::to_string( static_cast< int >( output_type ) ) },
+                          { "Endian", "Little" },
+                          { "Dimensions", std::to_string( number_of_nodes_global_ ) } },
+                        attribute_file_base ) );
+
+        return attribute;
     }
 
     std::string directory_path_;
@@ -459,9 +518,11 @@ class XDMFOutput
 
     // Collecting all views that are written on every write call.
     std::vector< std::pair< grid::Grid4DDataScalar< double >, OutputTypeFloat > > device_data_views_scalar_double_;
+    std::vector< std::pair< grid::Grid4DDataScalar< float >, OutputTypeFloat > >  device_data_views_scalar_float_;
 
     // Just a single mirror for buffering during write.
     std::optional< grid::Grid4DDataScalar< double >::HostMirror > host_data_mirror_scalar_double_;
+    std::optional< grid::Grid4DDataScalar< float >::HostMirror >  host_data_mirror_scalar_float_;
 
     int write_counter_ = 0;
 

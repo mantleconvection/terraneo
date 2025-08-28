@@ -22,7 +22,7 @@
 #include "terra/grid/shell/spherical_shell.hpp"
 #include "terra/kernels/common/grid_operations.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
-#include "terra/visualization/vtk.hpp"
+#include "terra/visualization/xdmf.hpp"
 #include "util/init.hpp"
 #include "util/table.hpp"
 
@@ -37,18 +37,19 @@ using grid::shell::DomainInfo;
 using grid::shell::SubdomainInfo;
 using linalg::VectorQ1Scalar;
 
+template < std::floating_point T >
 struct SolutionInterpolator
 {
-    Grid3DDataVec< double, 3 > grid_;
-    Grid2DDataScalar< double > radii_;
-    Grid4DDataScalar< double > data_;
-    bool                       only_boundary_;
+    Grid3DDataVec< T, 3 > grid_;
+    Grid2DDataScalar< T > radii_;
+    Grid4DDataScalar< T > data_;
+    bool                  only_boundary_;
 
     SolutionInterpolator(
-        const Grid3DDataVec< double, 3 >& grid,
-        const Grid2DDataScalar< double >& radii,
-        const Grid4DDataScalar< double >& data,
-        bool                              only_boundary )
+        const Grid3DDataVec< T, 3 >& grid,
+        const Grid2DDataScalar< T >& radii,
+        const Grid4DDataScalar< T >& data,
+        bool                         only_boundary )
     : grid_( grid )
     , radii_( radii )
     , data_( data )
@@ -58,10 +59,10 @@ struct SolutionInterpolator
     KOKKOS_INLINE_FUNCTION
     void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
     {
-        const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
-        // const double                  value  = coords( 0 ) * Kokkos::sin( coords( 1 ) ) * Kokkos::sinh( coords( 2 ) );
-        const double value = ( 1.0 / 2.0 ) * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
-        // const double value = 0.0;
+        const dense::Vec< T, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+        // const T                  value  = coords( 0 ) * Kokkos::sin( coords( 1 ) ) * Kokkos::sinh( coords( 2 ) );
+        const T value = ( 1.0 / 2.0 ) * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
+        // const T value = 0.0;
         if ( !only_boundary_ || ( r == 0 || r == radii_.extent( 1 ) - 1 ) )
         {
             data_( local_subdomain_id, x, y, r ) = value;
@@ -69,16 +70,17 @@ struct SolutionInterpolator
     }
 };
 
+template < std::floating_point T >
 struct RHSInterpolator
 {
-    Grid3DDataVec< double, 3 > grid_;
-    Grid2DDataScalar< double > radii_;
-    Grid4DDataScalar< double > data_;
+    Grid3DDataVec< T, 3 > grid_;
+    Grid2DDataScalar< T > radii_;
+    Grid4DDataScalar< T > data_;
 
     RHSInterpolator(
-        const Grid3DDataVec< double, 3 >& grid,
-        const Grid2DDataScalar< double >& radii,
-        const Grid4DDataScalar< double >& data )
+        const Grid3DDataVec< T, 3 >& grid,
+        const Grid2DDataScalar< T >& radii,
+        const Grid4DDataScalar< T >& data )
     : grid_( grid )
     , radii_( radii )
     , data_( data )
@@ -87,22 +89,23 @@ struct RHSInterpolator
     KOKKOS_INLINE_FUNCTION
     void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
     {
-        const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+        const dense::Vec< T, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
 
-        // const double value = coords( 0 );
-        const double value = ( 3.0 / 2.0 ) * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
-        // const double value                   = 0.0;
+        // const T value = coords( 0 );
+        const T value = ( 3.0 / 2.0 ) * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
+        // const T value                   = 0.0;
         data_( local_subdomain_id, x, y, r ) = value;
     }
 };
 
+template < std::floating_point T >
 struct SetOnBoundary
 {
-    Grid4DDataScalar< double > src_;
-    Grid4DDataScalar< double > dst_;
-    int                        num_shells_;
+    Grid4DDataScalar< T > src_;
+    Grid4DDataScalar< T > dst_;
+    int                   num_shells_;
 
-    SetOnBoundary( const Grid4DDataScalar< double >& src, const Grid4DDataScalar< double >& dst, const int num_shells )
+    SetOnBoundary( const Grid4DDataScalar< T >& src, const Grid4DDataScalar< T >& dst, const int num_shells )
     : src_( src )
     , dst_( dst )
     , num_shells_( num_shells )
@@ -118,11 +121,10 @@ struct SetOnBoundary
     }
 };
 
-template < typename Prolongation, typename Restriction >
-double
-    test( int min_level, int max_level, const std::shared_ptr< util::Table >& table, double omega, int prepost_smooth )
+template < std::floating_point T, typename Prolongation, typename Restriction >
+T test( int min_level, int max_level, const std::shared_ptr< util::Table >& table, T omega, int prepost_smooth )
 {
-    using ScalarType       = double;
+    using ScalarType       = T;
     using Laplace          = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
     using Smoother         = linalg::solvers::Jacobi< Laplace >;
     using CoarseGridSolver = linalg::solvers::PCG< Laplace >;
@@ -153,7 +155,8 @@ double
             level, level, 0.5, 1.0, grid::shell::subdomain_to_rank_distribute_full_diamonds );
         domains.push_back( domain );
 
-        subdomain_shell_coords.push_back( terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain ) );
+        subdomain_shell_coords.push_back(
+            terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain ) );
         subdomain_radii.push_back( terra::grid::shell::subdomain_shell_radii< ScalarType >( domain ) );
 
         mask_data.push_back( linalg::setup_mask_data( domain ) );
@@ -267,7 +270,7 @@ double
 
     Kokkos::fence();
 
-    linalg::solvers::IterativeSolverParameters solver_params{ 10000, 1e-16, 1e-16 };
+    linalg::solvers::IterativeSolverParameters solver_params{ 10000, 1e-7, 1e-7 };
 
     CoarseGridSolver coarse_grid_solver( solver_params, table, coarse_grid_tmps );
 
@@ -286,15 +289,15 @@ double
     const auto time_solver = timer.seconds();
 
     linalg::lincomb( error, { 1.0, -1.0 }, { u, solution } );
-    const auto l2_error = linalg::norm_2_scaled( error, 1.0 / static_cast< double >( num_dofs ) );
+    const auto l2_error = linalg::norm_2_scaled( error, 1.0 / static_cast< T >( num_dofs ) );
 
     if ( true )
     {
-        visualization::VTKOutput< ScalarType > vtk_fine( subdomain_shell_coords.back(), subdomain_radii.back(), false );
-        vtk_fine.add_scalar_field( u.grid_data() );
-        vtk_fine.add_scalar_field( solution.grid_data() );
-        vtk_fine.add_scalar_field( error.grid_data() );
-        vtk_fine.write( "test_laplace_multigrid_maxlevel_" + std::to_string( max_level ) + "_fine.vtu" );
+        visualization::XDMFOutput xdmf( ".", subdomain_shell_coords.back(), subdomain_radii.back() );
+        xdmf.add( u.grid_data() );
+        xdmf.add( solution.grid_data() );
+        xdmf.add( error.grid_data() );
+        xdmf.write();
     }
 
     table->add_row(
@@ -307,16 +310,15 @@ double
     return l2_error;
 }
 
-int main( int argc, char** argv )
+template < std::floating_point T >
+int run_test()
 {
-    util::terra_initialize( &argc, &argv );
-
-    double prev_l2_error = 1.0;
+    T prev_l2_error = 1.0;
 
     const int max_level = 4;
 
-    constexpr double omega          = 0.666;
-    constexpr int    prepost_smooth = 2;
+    constexpr T   omega          = 0.666;
+    constexpr int prepost_smooth = 2;
 
     for ( int level = 1; level <= max_level; level++ )
     {
@@ -325,9 +327,10 @@ int main( int argc, char** argv )
         Kokkos::Timer timer;
         timer.reset();
 
-        double l2_error = test<
-            fe::wedge::operators::shell::ProlongationConstant< double >,
-            fe::wedge::operators::shell::RestrictionConstant< double > >( 0, level, table, omega, prepost_smooth );
+        T l2_error = test<
+            T,
+            fe::wedge::operators::shell::ProlongationConstant< T >,
+            fe::wedge::operators::shell::RestrictionConstant< T > >( 0, level, table, omega, prepost_smooth );
 
         const auto time_total = timer.seconds();
         table->add_row( { { "tag", "time_total" }, { "level", level }, { "time_total", time_total } } );
@@ -335,7 +338,7 @@ int main( int argc, char** argv )
         if ( level > 1 )
         {
             std::cout << "l2_error = " << l2_error << std::endl;
-            const double order = prev_l2_error / l2_error;
+            const T order = prev_l2_error / l2_error;
             std::cout << "order = " << order << std::endl;
             if ( order < 3.4 )
             {
@@ -347,9 +350,17 @@ int main( int argc, char** argv )
         prev_l2_error = l2_error;
 
         table->query_rows_equals( "tag", "multigrid" ).print_pretty();
+        // table->query_rows_equals( "tag", "pcg_solver" ).print_pretty();
         table->query_rows_equals( "tag", "time_solver" ).print_pretty();
         table->query_rows_equals( "tag", "time_total" ).print_pretty();
     }
 
-    return 0;
+    return EXIT_SUCCESS;
+}
+
+int main( int argc, char** argv )
+{
+    util::terra_initialize( &argc, &argv );
+
+    return run_test< float >() + run_test< double >();
 }

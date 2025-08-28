@@ -63,7 +63,7 @@ struct Mat
 
     // Matrix-matrix multiplication
     KOKKOS_INLINE_FUNCTION
-    Mat< T, Rows, Cols > operator*( const Mat< T, Cols, Cols >& rhs ) const
+    Mat operator*( const Mat< T, Cols, Cols >& rhs ) const
     {
         Mat< T, Rows, Cols > result;
         for ( int i = 0; i < Rows; ++i )
@@ -97,7 +97,7 @@ struct Mat
     }
 
     KOKKOS_INLINE_FUNCTION
-    Mat< double, Rows, Cols >& operator+=( const Mat& mat )
+    Mat& operator+=( const Mat& mat )
     {
         for ( int i = 0; i < Rows; ++i )
         {
@@ -136,7 +136,7 @@ struct Mat
     }
 
     KOKKOS_INLINE_FUNCTION
-    Mat< double, Rows, Cols >& hadamard_product( const Mat& mat )
+    Mat& hadamard_product( const Mat& mat )
     {
         for ( int i = 0; i < Rows; ++i )
         {
