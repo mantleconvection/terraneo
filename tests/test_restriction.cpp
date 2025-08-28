@@ -57,12 +57,12 @@ void test_constant( int level )
     VectorQ1Scalar< ScalarType > error_fine( "error_fine", domain_fine, mask_data_fine );
 
     const auto subdomain_shell_coords_fine =
-        terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain_fine );
-    const auto subdomain_radii_fine = terra::grid::shell::subdomain_shell_radii( domain_fine );
+        terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain_fine );
+    const auto subdomain_radii_fine = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain_fine );
 
     const auto subdomain_shell_coords_coarse =
-        terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain_coarse );
-    const auto subdomain_radii_coarse = terra::grid::shell::subdomain_shell_radii( domain_coarse );
+        terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain_coarse );
+    const auto subdomain_radii_coarse = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain_coarse );
 
     using Prolongation = fe::wedge::operators::shell::ProlongationConstant< ScalarType >;
     using Restriction  = fe::wedge::operators::shell::RestrictionConstant< ScalarType >;
@@ -112,12 +112,12 @@ void test_linear( int level )
     VectorQ1Scalar< ScalarType > error_fine( "error_fine", domain_fine, mask_data_fine );
 
     const auto subdomain_shell_coords_fine =
-        terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain_fine );
-    const auto subdomain_radii_fine = terra::grid::shell::subdomain_shell_radii( domain_fine );
+        terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain_fine );
+    const auto subdomain_radii_fine = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain_fine );
 
     const auto subdomain_shell_coords_coarse =
-        terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain_coarse );
-    const auto subdomain_radii_coarse = terra::grid::shell::subdomain_shell_radii( domain_coarse );
+        terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain_coarse );
+    const auto subdomain_radii_coarse = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain_coarse );
 
     using Prolongation = fe::wedge::operators::shell::ProlongationLinear< ScalarType >;
     using Restriction  = fe::wedge::operators::shell::RestrictionLinear< ScalarType >;

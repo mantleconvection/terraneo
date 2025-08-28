@@ -221,12 +221,12 @@ std::pair< double, double > test( int level, const std::shared_ptr< util::Table 
         level - 1, level - 1, 0.5, 1.0, grid::shell::subdomain_to_rank_distribute_full_diamonds );
 
     const auto subdomain_fine_shell_coords =
-        terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain_fine );
-    const auto subdomain_fine_radii = terra::grid::shell::subdomain_shell_radii( domain_fine );
+        terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain_fine );
+    const auto subdomain_fine_radii = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain_fine );
 
     const auto subdomain_coarse_shell_coords =
-        terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain_coarse );
-    const auto subdomain_coarse_radii = terra::grid::shell::subdomain_shell_radii( domain_coarse );
+        terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain_coarse );
+    const auto subdomain_coarse_radii = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain_coarse );
 
     auto mask_data_fine   = linalg::setup_mask_data( domain_fine );
     auto mask_data_coarse = linalg::setup_mask_data( domain_coarse );

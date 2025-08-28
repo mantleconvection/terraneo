@@ -236,8 +236,8 @@ std::pair< double, double > test( int min_level, int max_level, const std::share
         domains.push_back(
             DistributedDomain::create_uniform_single_subdomain(
                 level, level, 0.5, 1.0, grid::shell::subdomain_to_rank_distribute_full_diamonds ) );
-        coords_shell.push_back( grid::shell::subdomain_unit_sphere_single_shell_coords( domains[idx] ) );
-        coords_radii.push_back( grid::shell::subdomain_shell_radii( domains[idx] ) );
+        coords_shell.push_back( grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domains[idx] ) );
+        coords_radii.push_back( grid::shell::subdomain_shell_radii< ScalarType >( domains[idx] ) );
         mask_data.push_back( linalg::setup_mask_data( domains[idx] ) );
     }
 

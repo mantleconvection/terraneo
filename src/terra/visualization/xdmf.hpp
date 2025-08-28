@@ -335,11 +335,13 @@ class XDMFOutput
     template < std::floating_point FloatingPointOutputType >
     void write_geometry_binary_data( std::stringstream& out )
     {
+        using GeometryInputType = double;
+
         // Copy mesh to host.
         // We assume the mesh is only written once so we throw away the host copies after this method returns.
-        const grid::Grid3DDataVec< double, 3 >::HostMirror coords_shell_host =
+        const grid::Grid3DDataVec< GeometryInputType, 3 >::HostMirror coords_shell_host =
             Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace{}, coords_shell_device_ );
-        const grid::Grid2DDataScalar< double >::HostMirror coords_radii_host =
+        const grid::Grid2DDataScalar< GeometryInputType >::HostMirror coords_radii_host =
             Kokkos::create_mirror_view_and_copy( Kokkos::HostSpace{}, coords_radii_device_ );
 
         for ( int local_subdomain_id = 0; local_subdomain_id < coords_shell_host.extent( 0 ); local_subdomain_id++ )

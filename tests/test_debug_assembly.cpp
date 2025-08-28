@@ -66,8 +66,8 @@ void test_laplace( int level )
     VectorQ1Scalar< ScalarType > u_src( "u_src", domain, mask_data );
     VectorQ1Scalar< ScalarType > u_dst( "u_dst", domain, mask_data );
 
-    const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
-    const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
+    const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
+    const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
 
     using Laplace = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
 
@@ -142,12 +142,12 @@ void test_prolongation( int level )
     VectorQ1Scalar< ScalarType > error_fine( "error_fine", domain_fine, mask_data_fine );
 
     const auto subdomain_shell_coords_fine =
-        terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain_fine );
-    const auto subdomain_radii_fine = terra::grid::shell::subdomain_shell_radii( domain_fine );
+        terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain_fine );
+    const auto subdomain_radii_fine = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain_fine );
 
     const auto subdomain_shell_coords_coarse =
-        terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain_coarse );
-    const auto subdomain_radii_coarse = terra::grid::shell::subdomain_shell_radii( domain_coarse );
+        terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain_coarse );
+    const auto subdomain_radii_coarse = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain_coarse );
 
     using Prolongation = fe::wedge::operators::shell::ProlongationConstant< ScalarType >;
 

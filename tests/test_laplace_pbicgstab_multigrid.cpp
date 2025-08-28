@@ -157,8 +157,8 @@ double
 
         domains.push_back( domain );
 
-        subdomain_shell_coords.push_back( terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain ) );
-        subdomain_radii.push_back( terra::grid::shell::subdomain_shell_radii( domain ) );
+        subdomain_shell_coords.push_back( terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain ) );
+        subdomain_radii.push_back( terra::grid::shell::subdomain_shell_radii< ScalarType >( domain ) );
 
         mask_data.push_back( linalg::setup_mask_data( domain ) );
     }

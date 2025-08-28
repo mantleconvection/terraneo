@@ -134,6 +134,4 @@ std::ostream& operator<<( std::ostream& os, const Vec< T, N >& v )
     return os;
 }
 
-using Vec3 = Vec< double, 3 >;
-
 } // namespace terra::dense

@@ -131,8 +131,8 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     const auto num_dofs = kernels::common::count_masked< long >( mask_data, grid::mask_owned() );
 
-    const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
-    const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
+    const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
+    const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
 
     using Laplace = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
 

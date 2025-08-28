@@ -103,8 +103,9 @@ void test( int level, int timesteps, double dt, const std::shared_ptr< util::Tab
     const auto num_dofs = linalg::dot( tmps[0], tmps[0] );
     std::cout << "Number of dofs: " << num_dofs << std::endl;
 
-    const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords( domain );
-    const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii( domain );
+    const auto subdomain_shell_coords =
+        terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
+    const auto subdomain_radii = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
 
     using AD = fe::wedge::operators::shell::UnsteadyAdvectionDiffusionSUPG< ScalarType >;
 
