@@ -5,6 +5,7 @@ target_include_directories(terra PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_sources(terra
         PRIVATE
+        library_dummy.cpp
         types.hpp)
 
 add_subdirectory(communication)
