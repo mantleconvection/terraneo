@@ -10,4 +10,5 @@ function(add_terra_performance_benchmark name)
 endfunction()
 
 add_terra_performance_benchmark(benchmark_baseline)
+add_terra_performance_benchmark(benchmark_operators)
 

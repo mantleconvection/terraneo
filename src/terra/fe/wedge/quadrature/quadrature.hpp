@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include "terra/dense/vec.hpp"
+
 /// @namespace terra::fe::wedge::quadrature
 /// @brief Quadrature rules for the reference wedge.
 ///

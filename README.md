@@ -21,7 +21,7 @@
 - [x] radial layer data assimilation
 - [ ] timing(tree?)
 - [x] ~~compress VTK(?)~~ XDMF output (binary, actual float data, and ~~/or~~ ~~HDF5/ADIOS2~~ with a single mesh file)
-- [ ] CLI interface / parameter files
+- [x] CLI interface / parameter files
 
 ### Small features / improvements (not necessarily / maybe required)
 

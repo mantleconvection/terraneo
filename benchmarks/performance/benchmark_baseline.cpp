@@ -6,6 +6,7 @@
 #include "terra/grid/shell/spherical_shell.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
 #include "terra/util/table_printer.hpp"
+#include "util/table.hpp"
 
 using terra::grid::shell::allocate_scalar_grid;
 using terra::grid::shell::DistributedDomain;
@@ -186,21 +187,23 @@ void run_all()
 
     for ( auto benchmark : all_benchmark_types )
     {
-        std::cout << "===================================================================================" << std::endl;
         std::cout << benchmark_description.at( benchmark ) << std::endl;
-        std::cout << "===================================================================================" << std::endl;
 
-        terra::util::TablePrinter table;
-        table.addRow( { "lateral level", "radial level", "dofs", "duration (s)", "updated dofs/sec" } );
+        terra::util::Table table;
 
         for ( int i = min_level; i <= max_level; ++i )
         {
             const auto data = run( benchmark, i, i, executions );
-            table.addRow( { i, i, data.dofs, data.duration, data.dofs / data.duration } );
+            table.add_row(
+                { { "lateral level", i },
+                  { "radial level", i },
+                  { "dofs", data.dofs },
+                  { "duration (s)", data.duration },
+                  { "updated dofs/sec", data.dofs / data.duration } } );
         }
 
-        table.print();
-        std::cout << "===================================================================================" << std::endl;
+        table.print_pretty();
+
         std::cout << std::endl;
         std::cout << std::endl;
     }
