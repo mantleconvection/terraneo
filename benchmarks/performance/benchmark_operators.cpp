@@ -28,6 +28,7 @@ using linalg::VectorQ1Vec;
 
 enum class BenchmarkType : int
 {
+    LaplaceFloat,
     LaplaceDouble,
     VectorLaplaceFloat,
     VectorLaplaceDouble,
@@ -36,6 +37,7 @@ enum class BenchmarkType : int
 };
 
 constexpr auto all_benchmark_types = {
+    BenchmarkType::LaplaceFloat,
     BenchmarkType::LaplaceDouble,
     BenchmarkType::VectorLaplaceFloat,
     BenchmarkType::VectorLaplaceDouble,
@@ -43,6 +45,7 @@ constexpr auto all_benchmark_types = {
     BenchmarkType::StokesDouble };
 
 const std::map< BenchmarkType, std::string > benchmark_description = {
+    { BenchmarkType::LaplaceFloat, "Laplace (float)" },
     { BenchmarkType::LaplaceDouble, "Laplace (double)" },
     { BenchmarkType::VectorLaplaceFloat, "VectorLaplace (float)" },
     { BenchmarkType::VectorLaplaceDouble, "VectorLaplace (double)" },
@@ -136,10 +139,23 @@ BenchmarkData run( const BenchmarkType benchmark, const int level, const int exe
     VectorQ1IsoQ2Q1< float > dst_stokes_float(
         "dst_stokes_double", domain, domain_coarse, mask_data, mask_data_coarse );
 
+    linalg::randomize( src_scalar_double );
+    linalg::randomize( src_scalar_float );
+    linalg::randomize( src_vec_double );
+    linalg::randomize( src_vec_float );
+    linalg::randomize( src_stokes_double );
+    linalg::randomize( src_stokes_float );
+
     double duration = 0.0;
     long   dofs     = 0;
 
-    if ( benchmark == BenchmarkType::LaplaceDouble )
+    if ( benchmark == BenchmarkType::LaplaceFloat )
+    {
+        LaplaceSimple< float > A( domain, coords_shell_float, coords_radii_float, true, false );
+        duration = measure_run_time( executions, A, src_scalar_float, dst_scalar_float );
+        dofs     = dofs_scalar;
+    }
+    else if ( benchmark == BenchmarkType::LaplaceDouble )
     {
         LaplaceSimple< double > A( domain, coords_shell_double, coords_radii_double, true, false );
         duration = measure_run_time( executions, A, src_scalar_double, dst_scalar_double );
