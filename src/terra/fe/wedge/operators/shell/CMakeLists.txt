@@ -3,6 +3,8 @@ target_sources(terra
         divergence.hpp
         gradient.hpp
         laplace.hpp
+        laplace_batched.hpp
+        laplace_no_matrix.hpp
         laplace_simple.hpp
         mass.hpp
         prolongation_linear.hpp

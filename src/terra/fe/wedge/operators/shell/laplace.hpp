@@ -40,6 +40,7 @@ class Laplace
     grid::Grid4DDataScalar< ScalarType > dst_;
 
   public:
+    [[deprecated( "Use other Laplace implementations." )]]
     Laplace(
         const grid::shell::DistributedDomain&   domain,
         const grid::Grid3DDataVec< double, 3 >& grid,
@@ -63,6 +64,8 @@ class Laplace
 
     void apply_impl( const SrcVectorType& src, DstVectorType& dst )
     {
+        Kokkos::abort( "Deprecated Laplace implementation." );
+
         if ( operator_apply_mode_ == linalg::OperatorApplyMode::Replace )
         {
             assign( dst, 0 );

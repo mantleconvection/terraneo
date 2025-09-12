@@ -6,6 +6,7 @@
 #include "terra/grid/shell/spherical_shell.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
 #include "terra/util/table_printer.hpp"
+#include "util/info.hpp"
 #include "util/table.hpp"
 
 using terra::grid::shell::allocate_scalar_grid;
@@ -225,6 +226,13 @@ int main( int argc, char** argv )
 {
     MPI_Init( &argc, &argv );
     Kokkos::ScopeGuard scope_guard( argc, argv );
+
+    if ( terra::mpi::num_processes() != 1 )
+    {
+        Kokkos::abort( "Benchmark not set up for more than 1 MPI process yet." );
+    }
+
+    terra::util::info_table().print_pretty();
 
     run_all();
 
