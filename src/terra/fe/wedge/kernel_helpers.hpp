@@ -56,6 +56,64 @@ KOKKOS_INLINE_FUNCTION void wedge_surface_physical_coords(
     wedge_surf_phy_coords[1][2] = quad_surface_coords[1][0];
 }
 
+template < std::floating_point T >
+KOKKOS_INLINE_FUNCTION void wedge_0_surface_physical_coords(
+    dense::Vec< T, 3 >*                wedge_surf_phy_coords,
+    const grid::Grid3DDataVec< T, 3 >& lateral_grid,
+    const int                          local_subdomain_id,
+    const int                          x_cell,
+    const int                          y_cell )
+{
+    // Extract vertex positions of quad
+    // (0, 0), (1, 0), (0, 1), (1, 1).
+    dense::Vec< T, 3 > quad_surface_coords[2][2];
+
+    for ( int x = x_cell; x <= x_cell + 1; x++ )
+    {
+        for ( int y = y_cell; y <= y_cell + 1; y++ )
+        {
+            for ( int d = 0; d < 3; d++ )
+            {
+                quad_surface_coords[x - x_cell][y - y_cell]( d ) = lateral_grid( local_subdomain_id, x, y, d );
+            }
+        }
+    }
+
+    // Sort coords for the two wedge surfaces.
+    wedge_surf_phy_coords[0] = quad_surface_coords[0][0];
+    wedge_surf_phy_coords[1] = quad_surface_coords[1][0];
+    wedge_surf_phy_coords[2] = quad_surface_coords[0][1];
+}
+
+template < std::floating_point T >
+KOKKOS_INLINE_FUNCTION void wedge_1_surface_physical_coords(
+    dense::Vec< T, 3 >*                wedge_surf_phy_coords,
+    const grid::Grid3DDataVec< T, 3 >& lateral_grid,
+    const int                          local_subdomain_id,
+    const int                          x_cell,
+    const int                          y_cell )
+{
+    // Extract vertex positions of quad
+    // (0, 0), (1, 0), (0, 1), (1, 1).
+    dense::Vec< T, 3 > quad_surface_coords[2][2];
+
+    for ( int x = x_cell; x <= x_cell + 1; x++ )
+    {
+        for ( int y = y_cell; y <= y_cell + 1; y++ )
+        {
+            for ( int d = 0; d < 3; d++ )
+            {
+                quad_surface_coords[x - x_cell][y - y_cell]( d ) = lateral_grid( local_subdomain_id, x, y, d );
+            }
+        }
+    }
+
+    // Sort coords for the two wedge surfaces.
+    wedge_surf_phy_coords[0] = quad_surface_coords[1][1];
+    wedge_surf_phy_coords[1] = quad_surface_coords[0][1];
+    wedge_surf_phy_coords[2] = quad_surface_coords[1][0];
+}
+
 /// @brief Computes the transposed inverse of the Jacobian of the lateral forward map from the reference triangle
 ///        to the triangle on the unit sphere and the absolute determinant of that Jacobian at the passed quadrature
 ///        points.
