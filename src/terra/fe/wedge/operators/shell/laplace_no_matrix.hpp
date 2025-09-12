@@ -118,6 +118,8 @@ class LaplaceNoMatrix
         constexpr int offset_y[2][6] = { { 0, 0, 1, 0, 0, 1 }, { 1, 1, 0, 1, 1, 0 } };
         constexpr int offset_r[2][6] = { { 0, 0, 0, 1, 1, 1 }, { 0, 0, 0, 1, 1, 1 } };
 
+        ScalarType dst_local_hex[8] = { 0 };
+
         for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
         {
             for ( int q = 0; q < num_quad_points; q++ )
@@ -128,8 +130,9 @@ class LaplaceNoMatrix
                 // 1. Compute Jacobian and inverse at this quadrature point.
 
                 const auto J                = jac( wedge_phy_surf[wedge], r_1, r_2, quad_points[q] );
-                const auto det              = Kokkos::abs( J.det() );
-                const auto J_inv_transposed = J.inv().transposed();
+                const auto det              = J.det();
+                const auto abs_det          = Kokkos::abs( det );
+                const auto J_inv_transposed = J.inv_transposed( det );
 
                 // 2. Compute physical gradients for all nodes at this quadrature point.
                 dense::Vec< ScalarType, 3 > grad_phy[num_nodes_per_wedge];
@@ -154,15 +157,32 @@ class LaplaceNoMatrix
                 // 4. Add the test function contributions.
                 for ( int i = 0; i < num_nodes_per_wedge; i++ )
                 {
+#if 0
                     Kokkos::atomic_add(
                         &dst_(
                             local_subdomain_id,
                             x_cell + offset_x[wedge][i],
                             y_cell + offset_y[wedge][i],
                             r_cell + offset_r[wedge][i] ),
-                        quad_weight * grad_phy[i].dot( grad_u ) * det );
+                        quad_weight * grad_phy[i].dot( grad_u ) * abs_det );
+#endif
+
+                    dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
+                        quad_weight * grad_phy[i].dot( grad_u ) * abs_det;
                 }
             }
+        }
+
+        for ( int i = 0; i < 8; i++ )
+        {
+            constexpr int hex_offset_x[8] = { 0, 1, 0, 1, 0, 1, 0, 1 };
+            constexpr int hex_offset_y[8] = { 0, 0, 1, 1, 0, 0, 1, 1 };
+            constexpr int hex_offset_r[8] = { 0, 0, 0, 0, 1, 1, 1, 1 };
+
+            Kokkos::atomic_add(
+                &dst_(
+                    local_subdomain_id, x_cell + hex_offset_x[i], y_cell + hex_offset_y[i], r_cell + hex_offset_r[i] ),
+                dst_local_hex[i] );
         }
     }
 };

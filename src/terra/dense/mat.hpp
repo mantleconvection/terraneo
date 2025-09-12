@@ -181,8 +181,10 @@ struct Mat
         else if constexpr ( Rows == 3 && Cols == 3 )
         {
             const T d = det();
+#ifndef NDEBUG
             if ( d == T( 0 ) )
                 Kokkos::abort( "Singular matrix" );
+#endif
             const T id = T( 1 ) / d;
 
             Mat< T, 3, 3 > r;
@@ -196,6 +198,84 @@ struct Mat
 
             r( 2, 0 ) = ( data[1][0] * data[2][1] - data[1][1] * data[2][0] ) * id;
             r( 2, 1 ) = -( data[0][0] * data[2][1] - data[0][1] * data[2][0] ) * id;
+            r( 2, 2 ) = ( data[0][0] * data[1][1] - data[0][1] * data[1][0] ) * id;
+            return r;
+        }
+        else
+        {
+            static_assert( Rows == -1, "inv() only implemented for 2x2 and 3x3 matrices" );
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    constexpr Mat inv_transposed() const
+    {
+        if constexpr ( Rows == 2 && Cols == 2 )
+        {
+            const T d = det();
+            if ( d == T( 0 ) )
+                Kokkos::abort( "Singular matrix" );
+            const T invDet = T( 1 ) / d;
+            return { { { data[1][1] * invDet, -data[0][1] * invDet }, { -data[1][0] * invDet, data[0][0] * invDet } } };
+        }
+        else if constexpr ( Rows == 3 && Cols == 3 )
+        {
+            const T d = det();
+#ifndef NDEBUG
+            if ( d == T( 0 ) )
+                Kokkos::abort( "Singular matrix" );
+#endif
+            const T id = T( 1 ) / d;
+
+            Mat< T, 3, 3 > r;
+            r( 0, 0 ) = ( data[1][1] * data[2][2] - data[1][2] * data[2][1] ) * id;
+            r( 0, 1 ) = -( data[1][0] * data[2][2] - data[1][2] * data[2][0] ) * id;
+            r( 0, 2 ) = ( data[1][0] * data[2][1] - data[1][1] * data[2][0] ) * id;
+
+            r( 1, 0 ) = -( data[0][1] * data[2][2] - data[0][2] * data[2][1] ) * id;
+            r( 1, 1 ) = ( data[0][0] * data[2][2] - data[0][2] * data[2][0] ) * id;
+            r( 1, 2 ) = -( data[0][0] * data[2][1] - data[0][1] * data[2][0] ) * id;
+
+            r( 2, 0 ) = ( data[0][1] * data[1][2] - data[0][2] * data[1][1] ) * id;
+            r( 2, 1 ) = -( data[0][0] * data[1][2] - data[0][2] * data[1][0] ) * id;
+            r( 2, 2 ) = ( data[0][0] * data[1][1] - data[0][1] * data[1][0] ) * id;
+            return r;
+        }
+        else
+        {
+            static_assert( Rows == -1, "inv() only implemented for 2x2 and 3x3 matrices" );
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    constexpr Mat inv_transposed( const T& det ) const
+    {
+        if constexpr ( Rows == 2 && Cols == 2 )
+        {
+            if ( det == T( 0 ) )
+                Kokkos::abort( "Singular matrix" );
+            const T invDet = T( 1 ) / det;
+            return { { { data[1][1] * invDet, -data[0][1] * invDet }, { -data[1][0] * invDet, data[0][0] * invDet } } };
+        }
+        else if constexpr ( Rows == 3 && Cols == 3 )
+        {
+#ifndef NDEBUG
+            if ( det == T( 0 ) )
+                Kokkos::abort( "Singular matrix" );
+#endif
+            const T id = T( 1 ) / det;
+
+            Mat< T, 3, 3 > r;
+            r( 0, 0 ) = ( data[1][1] * data[2][2] - data[1][2] * data[2][1] ) * id;
+            r( 0, 1 ) = -( data[1][0] * data[2][2] - data[1][2] * data[2][0] ) * id;
+            r( 0, 2 ) = ( data[1][0] * data[2][1] - data[1][1] * data[2][0] ) * id;
+
+            r( 1, 0 ) = -( data[0][1] * data[2][2] - data[0][2] * data[2][1] ) * id;
+            r( 1, 1 ) = ( data[0][0] * data[2][2] - data[0][2] * data[2][0] ) * id;
+            r( 1, 2 ) = -( data[0][0] * data[2][1] - data[0][1] * data[2][0] ) * id;
+
+            r( 2, 0 ) = ( data[0][1] * data[1][2] - data[0][2] * data[1][1] ) * id;
+            r( 2, 1 ) = -( data[0][0] * data[1][2] - data[0][2] * data[1][0] ) * id;
             r( 2, 2 ) = ( data[0][0] * data[1][1] - data[0][1] * data[1][0] ) * id;
             return r;
         }
