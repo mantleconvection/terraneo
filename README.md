@@ -10,14 +10,18 @@
 - [x] ~~GMRES~~ BiCGStab(l)
 - [x] BDF2 (not yet in a dedicated function, see test_heat_eq)
 - [x] multigrid (some notes: a) we need higher operator quad degree than constant (not sure where exactly: diagonal,
-  fine-level, everywhere?), b) two-grid V(10, 10) looks ok, otherwise with multigrid we do not get perfectly h-ind. conv rates., I
+  fine-level, everywhere?), b) two-grid V(10, 10) looks ok, otherwise with multigrid we do not get perfectly h-ind. conv
+  rates., I
   suppose we need Galerkin coarse grid operators maybe)
 - [x] MPI parallel execution (multi-GPU, multi-node CPU)
-- [ ] intra-diamond subdomain communication
+- [ ] intra-diamond subdomain communication (then also test/fix boundary handling in operators/tests - subdomain
+  boundaries are sometimes treated as domain boundaries even if they are not)
 - [ ] variable viscosity
 - [ ] plates
 - [ ] free-slip
 - [ ] compressible Stokes
+- [ ] Galerkin coarsening
+- [ ] iterative refinement
 - [x] radial layer data assimilation
 - [ ] timing(tree?)
 - [x] ~~compress VTK(?)~~ XDMF output (binary, actual float data, and ~~/or~~ ~~HDF5/ADIOS2~~ with a single mesh file)

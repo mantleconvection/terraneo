@@ -62,13 +62,15 @@ struct Mat
     const T& operator()( int i, int j ) const { return data[i][j]; }
 
     // Matrix-matrix multiplication
-    KOKKOS_INLINE_FUNCTION
-    Mat operator*( const Mat< T, Cols, Cols >& rhs ) const
+    template < int RHSRows, int RHSCols >
+    KOKKOS_INLINE_FUNCTION Mat< T, Rows, RHSCols > operator*( const Mat< T, RHSRows, RHSCols >& rhs ) const
     {
-        Mat< T, Rows, Cols > result;
+        static_assert( Cols == RHSRows, "Matrix dimensions do not match" );
+
+        Mat< T, Rows, RHSCols > result;
         for ( int i = 0; i < Rows; ++i )
         {
-            for ( int j = 0; j < Cols; ++j )
+            for ( int j = 0; j < RHSCols; ++j )
             {
                 result( i, j ) = T( 0 );
                 for ( int k = 0; k < Cols; ++k )
@@ -91,6 +93,20 @@ struct Mat
             for ( int j = 0; j < Cols; ++j )
             {
                 result( i ) += data[i][j] * vec( j );
+            }
+        }
+        return result;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    Mat operator*( const T& scalar ) const
+    {
+        Mat result;
+        for ( int i = 0; i < Rows; ++i )
+        {
+            for ( int j = 0; j < Cols; ++j )
+            {
+                result( i, j ) = data[i][j] * scalar;
             }
         }
         return result;
