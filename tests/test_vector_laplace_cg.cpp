@@ -2,7 +2,6 @@
 
 #include "../src/terra/communication/shell/communication.hpp"
 #include "fe/wedge/integrands.hpp"
-#include "fe/wedge/operators/shell/laplace.hpp"
 #include "fe/wedge/operators/shell/vector_laplace.hpp"
 #include "fe/wedge/operators/shell/vector_mass.hpp"
 #include "linalg/solvers/pcg.hpp"
@@ -142,8 +141,9 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     const auto num_dofs = kernels::common::count_masked< long >( mask_data, grid::mask_owned() );
 
-    const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
-    const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
+    const auto subdomain_shell_coords =
+        terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
+    const auto subdomain_radii = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
 
     using Laplace = fe::wedge::operators::shell::VectorLaplace< ScalarType, 3 >;
 
@@ -198,17 +198,6 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     linalg::lincomb( error, { 1.0, -1.0 }, { u, solution } );
     const auto l2_error = std::sqrt( dot( error, error ) / num_dofs );
-
-    if ( false )
-    {
-        visualization::VTKOutput< ScalarType > vtk_after( subdomain_shell_coords, subdomain_radii, false );
-        vtk_after.add_vector_field( g.grid_data() );
-        vtk_after.add_vector_field( u.grid_data() );
-        vtk_after.add_vector_field( solution.grid_data() );
-        vtk_after.add_vector_field( error.grid_data() );
-
-        vtk_after.write( "vector_laplace_cg_level" + std::to_string( level ) + ".vtu" );
-    }
 
     table->add_row(
         { { "level", level }, { "dofs", num_dofs }, { "l2_error", l2_error }, { "time_solver", time_solver } } );

@@ -4,7 +4,6 @@
 #include "fe/strong_algebraic_dirichlet_enforcement.hpp"
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/operators/shell/laplace.hpp"
-#include "fe/wedge/operators/shell/laplace_simple.hpp"
 #include "linalg/solvers/pcg.hpp"
 #include "linalg/solvers/richardson.hpp"
 #include "terra/dense/mat.hpp"
@@ -13,7 +12,7 @@
 #include "terra/grid/shell/spherical_shell.hpp"
 #include "terra/kernels/common/grid_operations.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
-#include "terra/visualization/vtk.hpp"
+#include "terra/visualization/xdmf.hpp"
 #include "util/init.hpp"
 #include "util/table.hpp"
 
@@ -133,7 +132,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
     const auto coords_shell = terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
     const auto coords_radii = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
 
-    using Laplace = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
+    using Laplace = fe::wedge::operators::shell::Laplace< ScalarType >;
 
     Laplace A( domain, coords_shell, coords_radii, true, false );
     Laplace A_neumann( domain, coords_shell, coords_radii, false, false );
@@ -190,13 +189,12 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     if ( false )
     {
-        visualization::VTKOutput< double > vtk_after( coords_shell, coords_radii, false );
-        vtk_after.add_scalar_field( g.grid_data() );
-        vtk_after.add_scalar_field( u.grid_data() );
-        vtk_after.add_scalar_field( solution.grid_data() );
-        vtk_after.add_scalar_field( error.grid_data() );
-
-        vtk_after.write( "laplace_cg_level" + std::to_string( level ) + ".vtu" );
+        visualization::XDMFOutput< double > xdmf( ".", coords_shell, coords_radii );
+        xdmf.add( g.grid_data() );
+        xdmf.add( u.grid_data() );
+        xdmf.add( solution.grid_data() );
+        xdmf.add( error.grid_data() );
+        xdmf.write();
     }
 
     table->add_row(

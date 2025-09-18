@@ -6,7 +6,6 @@
 #include "fe/strong_algebraic_dirichlet_enforcement.hpp"
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/operators/shell/laplace.hpp"
-#include "fe/wedge/operators/shell/laplace_simple.hpp"
 #include "fe/wedge/operators/shell/prolongation_constant.hpp"
 #include "fe/wedge/operators/shell/restriction_constant.hpp"
 #include "linalg/solvers/jacobi.hpp"
@@ -125,7 +124,7 @@ template < std::floating_point T, typename Prolongation, typename Restriction >
 T test( int min_level, int max_level, const std::shared_ptr< util::Table >& table, T omega, int prepost_smooth )
 {
     using ScalarType       = T;
-    using Laplace          = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
+    using Laplace          = fe::wedge::operators::shell::Laplace< ScalarType >;
     using Smoother         = linalg::solvers::Jacobi< Laplace >;
     using CoarseGridSolver = linalg::solvers::PCG< Laplace >;
 
@@ -270,7 +269,7 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
 
     Kokkos::fence();
 
-    linalg::solvers::IterativeSolverParameters solver_params{ 10000, 1e-7, 1e-7 };
+    linalg::solvers::IterativeSolverParameters solver_params{ 100, 1e-7, 1e-7 };
 
     CoarseGridSolver coarse_grid_solver( solver_params, table, coarse_grid_tmps );
 

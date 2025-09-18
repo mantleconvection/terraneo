@@ -2,7 +2,6 @@
 
 #include "../src/terra/communication/shell/communication.hpp"
 #include "fe/wedge/integrands.hpp"
-#include "fe/wedge/operators/shell/laplace.hpp"
 #include "fe/wedge/operators/shell/stokes.hpp"
 #include "fe/wedge/operators/shell/vector_laplace.hpp"
 #include "fe/wedge/operators/shell/vector_mass.hpp"
@@ -342,31 +341,6 @@ std::pair< double, double > test( int level, const std::shared_ptr< util::Table 
           { "l2_error_pre", l2_error_pressure },
           { "inf_res_vel", inf_residual_vel },
           { "inf_res_pre", inf_residual_pre } } );
-
-    if ( false )
-    {
-        visualization::VTKOutput< ScalarType > vtk_fine( subdomain_fine_shell_coords, subdomain_fine_radii, false );
-
-        visualization::VTKOutput< ScalarType > vtk_coarse( subdomain_coarse_shell_coords, subdomain_coarse_radii, false );
-
-        vtk_fine.add_vector_field( w.block_1().grid_data() );
-        vtk_coarse.add_scalar_field( w.block_2().grid_data() );
-
-        vtk_fine.add_vector_field( solution.block_1().grid_data() );
-        vtk_coarse.add_scalar_field( solution.block_2().grid_data() );
-
-        vtk_fine.add_vector_field( error.block_1().grid_data() );
-        vtk_coarse.add_scalar_field( error.block_2().grid_data() );
-
-        vtk_fine.add_vector_field( b.block_1().grid_data() );
-        vtk_coarse.add_scalar_field( b.block_2().grid_data() );
-
-        vtk_fine.add_vector_field( r.block_1().grid_data() );
-        vtk_coarse.add_scalar_field( r.block_2().grid_data() );
-
-        vtk_fine.write( "test_stokes_minres_fine_" + std::to_string( level ) + ".vtu" );
-        vtk_coarse.write( "test_stokes_minres_coarse_" + std::to_string( level ) + ".vtu" );
-    }
 
     return { l2_error_velocity, l2_error_pressure };
 }

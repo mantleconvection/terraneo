@@ -4,7 +4,6 @@
 #include "fe/strong_algebraic_dirichlet_enforcement.hpp"
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/operators/shell/laplace.hpp"
-#include "fe/wedge/operators/shell/laplace_simple.hpp"
 #include "linalg/solvers/pbicgstab.hpp"
 #include "linalg/solvers/pcg.hpp"
 #include "linalg/solvers/richardson.hpp"
@@ -15,7 +14,7 @@
 #include "terra/grid/shell/spherical_shell.hpp"
 #include "terra/kernels/common/grid_operations.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
-#include "terra/visualization/vtk.hpp"
+#include "terra/visualization/xdmf.hpp"
 #include "util/init.hpp"
 #include "util/table.hpp"
 
@@ -134,17 +133,16 @@ void test( int level, int timesteps, double dt, const std::shared_ptr< util::Tab
     linalg::solvers::PBiCGStab< AD > bicgstab( 2, solver_params, table, tmps );
     bicgstab.set_tag( "bicgstab_solver_level_" + std::to_string( level ) );
 
-    visualization::VTKOutput< ScalarType > vtk_after( subdomain_shell_coords, subdomain_radii, false );
-    vtk_after.add_scalar_field( T.grid_data() );
-    vtk_after.add_scalar_field( solution.grid_data() );
-    vtk_after.add_scalar_field( error.grid_data() );
-    vtk_after.add_vector_field( u.grid_data() );
+    visualization::XDMFOutput< ScalarType > xdmf_output( ".", subdomain_shell_coords, subdomain_radii );
+    xdmf_output.add( T.grid_data() );
+    xdmf_output.add( solution.grid_data() );
+    xdmf_output.add( error.grid_data() );
 
     constexpr auto vtk = false;
 
     if ( vtk )
     {
-        vtk_after.write( "advection_diffusion_" + std::to_string( level ) + "_ts_" + std::to_string( 0 ) + ".vtu" );
+        xdmf_output.write();
     }
 
     double l2_error = 0;
@@ -185,7 +183,7 @@ void test( int level, int timesteps, double dt, const std::shared_ptr< util::Tab
 
         if ( vtk )
         {
-            vtk_after.write( "heat_level_" + std::to_string( level ) + "_ts_" + std::to_string( ts ) + ".vtu" );
+            xdmf_output.write();
         }
     }
 
@@ -228,7 +226,7 @@ void test( int level, int timesteps, double dt, const std::shared_ptr< util::Tab
 
         if ( vtk )
         {
-            vtk_after.write( "heat_level_" + std::to_string( level ) + "_ts_" + std::to_string( ts ) + ".vtu" );
+            xdmf_output.write();
         }
     }
 

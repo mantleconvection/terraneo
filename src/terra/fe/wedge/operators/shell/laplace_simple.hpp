@@ -14,7 +14,7 @@
 namespace terra::fe::wedge::operators::shell {
 
 template < typename ScalarT >
-class LaplaceSimple
+class [[deprecated("Use Laplace")]] LaplaceSimple
 {
   public:
     using SrcVectorType = linalg::VectorQ1Scalar< ScalarT >;

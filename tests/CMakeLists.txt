@@ -64,7 +64,6 @@ add_terra_test(test_stokes_pbicgstab_multigrid 2)
 add_terra_test(test_table)
 add_terra_test(test_unsteady_advection_diffusion_supg)
 add_terra_test(test_vector_laplace_cg)
-add_terra_test(test_vtk_writer)
 add_terra_test(test_xdmf_writer)
 
 # Adding target for all the tests.

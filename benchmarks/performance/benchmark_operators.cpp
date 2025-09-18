@@ -1,10 +1,7 @@
 
 #include <kernels/common/grid_operations.hpp>
 
-#include "fe/wedge/operators/shell/laplace_batched.hpp"
-#include "fe/wedge/operators/shell/laplace_no_matrix.hpp"
-#include "fe/wedge/operators/shell/laplace_no_matrix_teams.hpp"
-#include "fe/wedge/operators/shell/laplace_simple.hpp"
+#include "fe/wedge/operators/shell/laplace.hpp"
 #include "fe/wedge/operators/shell/stokes.hpp"
 #include "fe/wedge/operators/shell/vector_laplace.hpp"
 #include "linalg/operator.hpp"
@@ -19,10 +16,8 @@
 #include "util/table.hpp"
 
 using namespace terra;
-using fe::wedge::operators::shell::LaplaceBatched;
-using fe::wedge::operators::shell::LaplaceNoMatrix;
-using fe::wedge::operators::shell::LaplaceNoMatrixTeams;
-using fe::wedge::operators::shell::LaplaceSimple;
+
+using fe::wedge::operators::shell::Laplace;
 using fe::wedge::operators::shell::Stokes;
 using fe::wedge::operators::shell::VectorLaplace;
 using linalg::apply;
@@ -37,12 +32,6 @@ enum class BenchmarkType : int
 {
     LaplaceFloat,
     LaplaceDouble,
-    LaplaceNoMatrixFloat,
-    LaplaceNoMatrixDouble,
-    LaplaceNoMatrixTeamsFloat,
-    LaplaceNoMatrixTeamsDouble,
-    LaplaceBatchedFloat,
-    LaplaceBatchedDouble,
     VectorLaplaceFloat,
     VectorLaplaceDouble,
     VectorLaplaceNeumannDouble,
@@ -52,12 +41,6 @@ enum class BenchmarkType : int
 constexpr auto all_benchmark_types = {
     BenchmarkType::LaplaceFloat,
     BenchmarkType::LaplaceDouble,
-    BenchmarkType::LaplaceNoMatrixFloat,
-    BenchmarkType::LaplaceNoMatrixDouble,
-    BenchmarkType::LaplaceNoMatrixTeamsFloat,
-    BenchmarkType::LaplaceNoMatrixTeamsDouble,
-    BenchmarkType::LaplaceBatchedFloat,
-    BenchmarkType::LaplaceBatchedDouble,
     BenchmarkType::VectorLaplaceFloat,
     BenchmarkType::VectorLaplaceDouble,
     BenchmarkType::VectorLaplaceNeumannDouble,
@@ -66,12 +49,6 @@ constexpr auto all_benchmark_types = {
 const std::map< BenchmarkType, std::string > benchmark_description = {
     { BenchmarkType::LaplaceFloat, "Laplace (float)" },
     { BenchmarkType::LaplaceDouble, "Laplace (double)" },
-    { BenchmarkType::LaplaceNoMatrixFloat, "Laplace, no matrix (float)" },
-    { BenchmarkType::LaplaceNoMatrixDouble, "Laplace, no matrix (double)" },
-    { BenchmarkType::LaplaceNoMatrixTeamsFloat, "Laplace, no matrix, teams (float)" },
-    { BenchmarkType::LaplaceNoMatrixTeamsDouble, "Laplace, no matrix, teams (double)" },
-    { BenchmarkType::LaplaceBatchedFloat, "Laplace, batched (float)" },
-    { BenchmarkType::LaplaceBatchedDouble, "Laplace, batched (double)" },
     { BenchmarkType::VectorLaplaceFloat, "VectorLaplace (float)" },
     { BenchmarkType::VectorLaplaceDouble, "VectorLaplace (double)" },
     { BenchmarkType::VectorLaplaceNeumannDouble, "VectorLaplaceNeumann (double)" },
@@ -176,49 +153,13 @@ BenchmarkData run( const BenchmarkType benchmark, const int level, const int exe
 
     if ( benchmark == BenchmarkType::LaplaceFloat )
     {
-        LaplaceSimple< float > A( domain, coords_shell_float, coords_radii_float, false, false );
+        Laplace< float > A( domain, coords_shell_float, coords_radii_float, true, false );
         duration = measure_run_time( executions, A, src_scalar_float, dst_scalar_float );
         dofs     = dofs_scalar;
     }
     else if ( benchmark == BenchmarkType::LaplaceDouble )
     {
-        LaplaceSimple< double > A( domain, coords_shell_double, coords_radii_double, false, false );
-        duration = measure_run_time( executions, A, src_scalar_double, dst_scalar_double );
-        dofs     = dofs_scalar;
-    }
-    else if ( benchmark == BenchmarkType::LaplaceBatchedFloat )
-    {
-        LaplaceBatched< float > A( domain, coords_shell_float, coords_radii_float, false, false );
-        duration = measure_run_time( executions, A, src_scalar_float, dst_scalar_float );
-        dofs     = dofs_scalar;
-    }
-    else if ( benchmark == BenchmarkType::LaplaceBatchedDouble )
-    {
-        LaplaceBatched< double > A( domain, coords_shell_double, coords_radii_double, false, false );
-        duration = measure_run_time( executions, A, src_scalar_double, dst_scalar_double );
-        dofs     = dofs_scalar;
-    }
-    else if ( benchmark == BenchmarkType::LaplaceNoMatrixFloat )
-    {
-        LaplaceNoMatrix< float > A( domain, coords_shell_float, coords_radii_float, false, false );
-        duration = measure_run_time( executions, A, src_scalar_float, dst_scalar_float );
-        dofs     = dofs_scalar;
-    }
-    else if ( benchmark == BenchmarkType::LaplaceNoMatrixDouble )
-    {
-        LaplaceNoMatrix< double > A( domain, coords_shell_double, coords_radii_double, false, false );
-        duration = measure_run_time( executions, A, src_scalar_double, dst_scalar_double );
-        dofs     = dofs_scalar;
-    }
-    else if ( benchmark == BenchmarkType::LaplaceNoMatrixTeamsFloat )
-    {
-        LaplaceNoMatrixTeams< float > A( domain, coords_shell_float, coords_radii_float, false, false );
-        duration = measure_run_time( executions, A, src_scalar_float, dst_scalar_float );
-        dofs     = dofs_scalar;
-    }
-    else if ( benchmark == BenchmarkType::LaplaceNoMatrixTeamsDouble )
-    {
-        LaplaceNoMatrixTeams< double > A( domain, coords_shell_double, coords_radii_double, false, false );
+        Laplace< double > A( domain, coords_shell_double, coords_radii_double, true, false );
         duration = measure_run_time( executions, A, src_scalar_double, dst_scalar_double );
         dofs     = dofs_scalar;
     }

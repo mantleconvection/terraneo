@@ -3,14 +3,13 @@
 #include "../src/terra/communication/shell/communication.hpp"
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/operators/shell/laplace.hpp"
-#include "fe/wedge/operators/shell/laplace_simple.hpp"
 #include "linalg/solvers/richardson.hpp"
 #include "terra/fe/wedge/operators/shell/prolongation_constant.hpp"
 #include "terra/grid/grid_types.hpp"
 #include "terra/grid/shell/spherical_shell.hpp"
 #include "terra/kernels/common/grid_operations.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
-#include "terra/visualization/vtk.hpp"
+#include "terra/visualization/xdmf.hpp"
 #include "util/init.hpp"
 #include "util/table.hpp"
 
@@ -182,17 +181,17 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     if ( true )
     {
-        visualization::VTKOutput< ScalarType > vtk_fine( subdomain_shell_coords_fine, subdomain_radii_fine, false );
-        vtk_fine.add_scalar_field( u_fine.grid_data() );
-        vtk_fine.add_scalar_field( solution_fine.grid_data() );
-        vtk_fine.add_scalar_field( error_fine.grid_data() );
+        visualization::XDMFOutput xdmf_output_fine( ".", subdomain_shell_coords_fine, subdomain_radii_fine );
+        xdmf_output_fine.add( u_fine.grid_data() );
+        xdmf_output_fine.add( solution_fine.grid_data() );
+        xdmf_output_fine.add( error_fine.grid_data() );
 
-        vtk_fine.write( "prolongation_fine_level_" + std::to_string( level ) + ".vtu" );
+        xdmf_output_fine.write();
 
-        visualization::VTKOutput< ScalarType > vtk_coarse( subdomain_shell_coords_coarse, subdomain_radii_coarse, false );
-        vtk_coarse.add_scalar_field( u_coarse.grid_data() );
+        visualization::XDMFOutput xdmf_output_coarse( ".", subdomain_shell_coords_coarse, subdomain_radii_coarse );
+        xdmf_output_coarse.add( u_coarse.grid_data() );
 
-        vtk_coarse.write( "prolongation_coarse_level_" + std::to_string( level ) + ".vtu" );
+        xdmf_output_coarse.write();
     }
 
     return error_norm;

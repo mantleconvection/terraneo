@@ -7,7 +7,6 @@
 #include "fe/strong_algebraic_dirichlet_enforcement.hpp"
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/operators/shell/laplace.hpp"
-#include "fe/wedge/operators/shell/laplace_simple.hpp"
 #include "fe/wedge/operators/shell/prolongation_constant.hpp"
 #include "fe/wedge/operators/shell/restriction_constant.hpp"
 #include "linalg/solvers/jacobi.hpp"
@@ -124,7 +123,7 @@ double
     test( int min_level, int max_level, const std::shared_ptr< util::Table >& table, double omega, int prepost_smooth )
 {
     using ScalarType       = double;
-    using Laplace          = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
+    using Laplace          = fe::wedge::operators::shell::Laplace< ScalarType >;
     using Smoother         = linalg::solvers::Jacobi< Laplace >;
     using CoarseGridSolver = linalg::solvers::PCG< Laplace >;
 
@@ -157,7 +156,8 @@ double
 
         domains.push_back( domain );
 
-        subdomain_shell_coords.push_back( terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain ) );
+        subdomain_shell_coords.push_back(
+            terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain ) );
         subdomain_radii.push_back( terra::grid::shell::subdomain_shell_radii< ScalarType >( domain ) );
 
         mask_data.push_back( linalg::setup_mask_data( domain ) );
@@ -304,15 +304,6 @@ double
 
     linalg::lincomb( error, { 1.0, -1.0 }, { u, solution } );
     const auto l2_error = linalg::norm_2_scaled( error, 1.0 / static_cast< double >( num_dofs ) );
-
-    if ( true )
-    {
-        visualization::VTKOutput< ScalarType > vtk_fine( subdomain_shell_coords.back(), subdomain_radii.back(), false );
-        vtk_fine.add_scalar_field( u.grid_data() );
-        vtk_fine.add_scalar_field( solution.grid_data() );
-        vtk_fine.add_scalar_field( error.grid_data() );
-        vtk_fine.write( "test_laplace_pbicgstab_multigrid_maxlevel_" + std::to_string( max_level ) + "_fine.vtu" );
-    }
 
     table->add_row(
         { { "tag", "time_solver" },

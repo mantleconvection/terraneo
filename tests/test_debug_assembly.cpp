@@ -1,7 +1,7 @@
 
 
 #include "fe/strong_algebraic_dirichlet_enforcement.hpp"
-#include "fe/wedge/operators/shell/laplace_simple.hpp"
+#include "fe/wedge/operators/shell/laplace.hpp"
 #include "fe/wedge/operators/shell/prolongation_constant.hpp"
 #include "linalg/solvers/richardson.hpp"
 #include "linalg/util/debug_sparse_assembly.hpp"
@@ -69,7 +69,7 @@ void test_laplace( int level )
     const auto subdomain_shell_coords = terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
     const auto subdomain_radii        = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
 
-    using Laplace = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
+    using Laplace = fe::wedge::operators::shell::Laplace< ScalarType >;
 
     Laplace A( domain, subdomain_shell_coords, subdomain_radii, false, false );
 

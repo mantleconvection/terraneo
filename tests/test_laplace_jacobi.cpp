@@ -3,7 +3,6 @@
 #include "../src/terra/communication/shell/communication.hpp"
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/operators/shell/laplace.hpp"
-#include "fe/wedge/operators/shell/laplace_simple.hpp"
 #include "linalg/solvers/jacobi.hpp"
 #include "linalg/solvers/pcg.hpp"
 #include "linalg/solvers/richardson.hpp"
@@ -136,7 +135,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
         terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
     const auto subdomain_radii = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
 
-    using Laplace = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
+    using Laplace = fe::wedge::operators::shell::Laplace< ScalarType >;
 
     Laplace A( domain, subdomain_shell_coords, subdomain_radii, true, false );
     Laplace A_neumann( domain, subdomain_shell_coords, subdomain_radii, false, false );
@@ -190,17 +189,6 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     linalg::lincomb( error, { 1.0, -1.0 }, { u, solution } );
     const auto l2_error = std::sqrt( dot( error, error ) / num_dofs );
-
-    if ( true )
-    {
-        visualization::VTKOutput< double > vtk_after( subdomain_shell_coords, subdomain_radii, false );
-        vtk_after.add_scalar_field( g.grid_data() );
-        vtk_after.add_scalar_field( u.grid_data() );
-        vtk_after.add_scalar_field( solution.grid_data() );
-        vtk_after.add_scalar_field( error.grid_data() );
-
-        vtk_after.write( "test_laplace_jacobi_level" + std::to_string( level ) + ".vtu" );
-    }
 
     table->add_row(
         { { "level", level }, { "dofs", num_dofs }, { "l2_error", l2_error }, { "time_solver", time_solver } } );

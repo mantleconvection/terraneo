@@ -3,7 +3,7 @@
 #include "../src/terra/communication/shell/communication.hpp"
 #include "fe/strong_algebraic_dirichlet_enforcement.hpp"
 #include "fe/wedge/integrands.hpp"
-#include "fe/wedge/operators/shell/laplace.hpp"
+#include "fe/wedge/operators/shell/identity.hpp"
 #include "fe/wedge/operators/shell/prolongation_constant.hpp"
 #include "fe/wedge/operators/shell/restriction_constant.hpp"
 #include "fe/wedge/operators/shell/stokes.hpp"
@@ -437,11 +437,17 @@ std::pair< double, double > test( int min_level, int max_level, const std::share
     PrecVisc prec_11(
         P, R, A_c, tmp_mg_r, tmp_mg_e, tmp_mg, smoothers, smoothers, coarse_grid_solver, num_mg_cycles, 1e-8 );
 
-    using PrecSchur = linalg::solvers::IdentitySolver< Stokes::Block22Type >;
+    using PrecSchur = linalg::solvers::IdentitySolver< fe::wedge::operators::shell::Identity< ScalarType > >;
     PrecSchur prec_22;
 
-    using PrecStokes = linalg::solvers::BlockDiagonalPreconditioner2x2< Stokes, PrecVisc, PrecSchur >;
-    PrecStokes prec_stokes( prec_11, prec_22 );
+    using PrecStokes = linalg::solvers::BlockDiagonalPreconditioner2x2<
+        Stokes,
+        Viscous,
+        fe::wedge::operators::shell::Identity< ScalarType >,
+        PrecVisc,
+        PrecSchur >;
+
+    PrecStokes prec_stokes( K.block_11(), fe::wedge::operators::shell::Identity< ScalarType >(), prec_11, prec_22 );
 
     linalg::solvers::IterativeSolverParameters solver_params{ 100, 1e-8, 1e-12 };
 
@@ -453,7 +459,7 @@ std::pair< double, double > test( int min_level, int max_level, const std::share
 
     linalg::solvers::PBiCGStab< Stokes, PrecStokes > pbicgstab( 2, solver_params, table, tmp_bicgstab, prec_stokes );
 
-    solve( pbicgstab, K, u, f );
+    linalg::solvers::solve( pbicgstab, K, u, f );
 
     const double avg_pressure_solution =
         kernels::common::masked_sum(
@@ -485,31 +491,6 @@ std::pair< double, double > test( int min_level, int max_level, const std::share
           { "l2_error_pre", l2_error_pressure },
           { "inf_res_vel", inf_residual_vel },
           { "inf_res_pre", inf_residual_pre } } );
-
-    if ( true )
-    {
-        visualization::VTKOutput< ScalarType > vtk_fine( coords_shell[velocity_level], coords_radii[velocity_level], false );
-
-        visualization::VTKOutput< ScalarType > vtk_coarse( coords_shell[pressure_level], coords_radii[pressure_level], false );
-
-        vtk_fine.add_vector_field( u.block_1().grid_data() );
-        vtk_coarse.add_scalar_field( u.block_2().grid_data() );
-
-        vtk_fine.add_vector_field( solution.block_1().grid_data() );
-        vtk_coarse.add_scalar_field( solution.block_2().grid_data() );
-
-        vtk_fine.add_vector_field( error.block_1().grid_data() );
-        vtk_coarse.add_scalar_field( error.block_2().grid_data() );
-
-        vtk_fine.add_vector_field( f.block_1().grid_data() );
-        vtk_coarse.add_scalar_field( f.block_2().grid_data() );
-
-        vtk_fine.add_vector_field( stok_vecs["tmp_5"].block_1().grid_data() );
-        vtk_coarse.add_scalar_field( stok_vecs["tmp_5"].block_2().grid_data() );
-
-        vtk_fine.write( "test_stokes_pbicgstab_" + std::to_string( max_level ) + "_vel.vtu" );
-        vtk_coarse.write( "test_stokes_pbicgstab_" + std::to_string( max_level ) + "_pre.vtu" );
-    }
 
     return { l2_error_velocity, l2_error_pressure };
 }

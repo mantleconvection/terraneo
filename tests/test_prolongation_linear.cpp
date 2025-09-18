@@ -4,7 +4,6 @@
 #include "fe/strong_algebraic_dirichlet_enforcement.hpp"
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/operators/shell/laplace.hpp"
-#include "fe/wedge/operators/shell/laplace_simple.hpp"
 #include "linalg/solvers/pcg.hpp"
 #include "linalg/solvers/richardson.hpp"
 #include "terra/dense/mat.hpp"
@@ -183,21 +182,6 @@ double test( int level, const std::shared_ptr< util::Table >& table )
     const auto num_dofs = kernels::common::count_masked< long >( mask_data_fine, grid::mask_owned() );
 
     const auto error_norm = linalg::norm_2_scaled( error_fine, 1.0 / num_dofs );
-
-    if ( true )
-    {
-        visualization::VTKOutput< ScalarType > vtk_fine( subdomain_shell_coords_fine, subdomain_radii_fine, false );
-        vtk_fine.add_scalar_field( u_fine.grid_data() );
-        vtk_fine.add_scalar_field( solution_fine.grid_data() );
-        vtk_fine.add_scalar_field( error_fine.grid_data() );
-
-        vtk_fine.write( "prolongation_fine_level_" + std::to_string( level ) + ".vtu" );
-
-        visualization::VTKOutput< ScalarType > vtk_coarse( subdomain_shell_coords_coarse, subdomain_radii_coarse, false );
-        vtk_coarse.add_scalar_field( u_coarse.grid_data() );
-
-        vtk_coarse.write( "prolongation_coarse_level_" + std::to_string( level ) + ".vtu" );
-    }
 
     return error_norm;
 }
