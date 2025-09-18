@@ -9,6 +9,8 @@ function(add_terra_performance_benchmark name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+add_terra_performance_benchmark(benchmark_alt)
+add_terra_performance_benchmark(benchmark_alt_fe)
 add_terra_performance_benchmark(benchmark_baseline)
 add_terra_performance_benchmark(benchmark_operators)
 
