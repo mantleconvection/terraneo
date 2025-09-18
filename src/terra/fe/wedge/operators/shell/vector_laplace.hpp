@@ -1,11 +1,11 @@
 
 #pragma once
 
+#include "../../quadrature/quadrature.hpp"
 #include "communication/shell/communication.hpp"
 #include "dense/vec.hpp"
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/kernel_helpers.hpp"
-#include "fe/wedge/quadrature/quadrature.hpp"
 #include "grid/shell/spherical_shell.hpp"
 #include "linalg/operator.hpp"
 #include "linalg/vector.hpp"
@@ -79,6 +79,17 @@ class VectorLaplace
         src_ = src.grid_data();
         dst_ = dst.grid_data();
 
+        if ( src_.extent( 0 ) != dst_.extent( 0 ) || src_.extent( 1 ) != dst_.extent( 1 ) ||
+             src_.extent( 2 ) != dst_.extent( 2 ) || src_.extent( 3 ) != dst_.extent( 3 ) )
+        {
+            throw std::runtime_error( "LaplaceSimple: src/dst mismatch" );
+        }
+
+        if ( src_.extent( 1 ) != grid_.extent( 1 ) || src_.extent( 2 ) != grid_.extent( 2 ) )
+        {
+            throw std::runtime_error( "LaplaceSimple: src/dst mismatch" );
+        }
+
         Kokkos::parallel_for( "matvec", grid::shell::local_domain_md_range_policy_cells( domain_ ), *this );
 
         if ( operator_communication_mode_ == linalg::OperatorCommunicationMode::CommunicateAdditively )
@@ -92,14 +103,15 @@ class VectorLaplace
     KOKKOS_INLINE_FUNCTION void
         operator()( const int local_subdomain_id, const int x_cell, const int y_cell, const int r_cell ) const
     {
-        // First all the r-independent stuff.
         // Gather surface points for each wedge.
-
         dense::Vec< ScalarT, 3 > wedge_phy_surf[num_wedges_per_hex_cell][num_nodes_per_wedge_surface] = {};
         wedge_surface_physical_coords( wedge_phy_surf, grid_, local_subdomain_id, x_cell, y_cell );
 
-        // Compute lateral part of Jacobian.
+        // Gather wedge radii.
+        const ScalarT r_1 = radii_( local_subdomain_id, r_cell );
+        const ScalarT r_2 = radii_( local_subdomain_id, r_cell + 1 );
 
+        // Quadrature points.
         constexpr auto num_quad_points = quadrature::quad_felippa_3x2_num_quad_points;
 
         dense::Vec< ScalarT, 3 > quad_points[num_quad_points];
@@ -108,114 +120,268 @@ class VectorLaplace
         quadrature::quad_felippa_3x2_quad_points( quad_points );
         quadrature::quad_felippa_3x2_quad_weights( quad_weights );
 
-        dense::Mat< ScalarT, 3, 3 > jac_lat_inv_t[num_wedges_per_hex_cell][num_quad_points] = {};
-        ScalarT                     det_jac_lat[num_wedges_per_hex_cell][num_quad_points]   = {};
+        // Compute the local element matrix.
 
-        jacobian_lat_inverse_transposed_and_determinant( jac_lat_inv_t, det_jac_lat, wedge_phy_surf, quad_points );
+        ScalarType src_local_hex[8][VecDim] = { { 0 } };
+        ScalarType dst_local_hex[8][VecDim] = { { 0 } };
 
-        dense::Vec< ScalarT, 3 > g_rad[num_wedges_per_hex_cell][num_nodes_per_wedge][num_quad_points] = {};
-        dense::Vec< ScalarT, 3 > g_lat[num_wedges_per_hex_cell][num_nodes_per_wedge][num_quad_points] = {};
-
-        lateral_parts_of_grad_phi( g_rad, g_lat, jac_lat_inv_t, quad_points );
-
-        // Only now we introduce radially dependent terms.
-        const ScalarT r_1 = radii_( local_subdomain_id, r_cell );
-        const ScalarT r_2 = radii_( local_subdomain_id, r_cell + 1 );
-
-        // For now, compute the local element matrix. We'll improve that later.
-        dense::Mat< ScalarT, 6, 6 > A[num_wedges_per_hex_cell] = {};
-
-        // TODO: this can be absorbed into g_lat.
-        // TODO: ALSO we can sometimes avoid division if we pull the r^2 and grad_r out of the determinant and replace
-        //       the prefactors for the g_lat and g_rad but this is very form-specific.
-        const ScalarT grad_r     = grad_forward_map_rad( r_1, r_2 );
-        const ScalarT grad_r_inv = 1.0 / grad_r;
-
-        for ( int q = 0; q < num_quad_points; q++ )
+        for ( int i = 0; i < 8; i++ )
         {
-            // TODO: We could precompute that per quadrature point and store in a View globally to avoid the division.
-            const ScalarT r     = forward_map_rad( r_1, r_2, quad_points[q]( 2 ) );
-            const ScalarT r_inv = 1.0 / r;
-
-            for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
+            for ( int d = 0; d < VecDim; d++ )
             {
-                for ( int i = 0; i < num_nodes_per_wedge; i++ )
+                constexpr int hex_offset_x[8] = { 0, 1, 0, 1, 0, 1, 0, 1 };
+                constexpr int hex_offset_y[8] = { 0, 0, 1, 1, 0, 0, 1, 1 };
+                constexpr int hex_offset_r[8] = { 0, 0, 0, 0, 1, 1, 1, 1 };
+
+                src_local_hex[i][d] = src_(
+                    local_subdomain_id,
+                    x_cell + hex_offset_x[i],
+                    y_cell + hex_offset_y[i],
+                    r_cell + hex_offset_r[i],
+                    d );
+            }
+        }
+
+        for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
+        {
+            for ( int q = 0; q < num_quad_points; q++ )
+            {
+                const auto quad_point  = quad_points[q];
+                const auto quad_weight = quad_weights[q];
+
+                // 1. Compute Jacobian and inverse at this quadrature point.
+
+                const auto J                = jac( wedge_phy_surf[wedge], r_1, r_2, quad_points[q] );
+                const auto det              = J.det();
+                const auto abs_det          = Kokkos::abs( det );
+                const auto J_inv_transposed = J.inv_transposed( det );
+
+                // 2. Compute physical gradients for all nodes at this quadrature point.
+                dense::Vec< ScalarType, 3 > grad_phy[num_nodes_per_wedge];
+                for ( int k = 0; k < num_nodes_per_wedge; k++ )
                 {
-                    for ( int j = 0; j < num_nodes_per_wedge; j++ )
-                    {
-                        const auto grad_i = grad_shape_full( g_rad, g_lat, r_inv, grad_r_inv, wedge, i, q );
-                        const auto grad_j = grad_shape_full( g_rad, g_lat, r_inv, grad_r_inv, wedge, j, q );
+                    grad_phy[k] = J_inv_transposed * grad_shape( k, quad_point );
+                }
 
-                        const auto det = det_full( det_jac_lat, r, grad_r, wedge, q );
-
-                        A[wedge]( i, j ) += quad_weights[q] * ( grad_i.dot( grad_j ) * det );
-                    }
+                if ( diagonal_ )
+                {
+                    diagonal( src_local_hex, dst_local_hex, wedge, quad_weight, abs_det, grad_phy );
+                }
+                else if ( treat_boundary_ && r_cell == 0 )
+                {
+                    // Bottom boundary dirichlet
+                    dirichlet_bot( src_local_hex, dst_local_hex, wedge, quad_weight, abs_det, grad_phy );
+                }
+                else if ( treat_boundary_ && r_cell + 1 == radii_.extent( 1 ) - 1 )
+                {
+                    // Top boundary dirichlet
+                    dirichlet_top( src_local_hex, dst_local_hex, wedge, quad_weight, abs_det, grad_phy );
+                }
+                else
+                {
+                    neumann( src_local_hex, dst_local_hex, wedge, quad_weight, abs_det, grad_phy );
                 }
             }
         }
 
-        if ( treat_boundary_ )
+        for ( int i = 0; i < 8; i++ )
         {
-            for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
+            for ( int d = 0; d < VecDim; d++ )
             {
-                dense::Mat< ScalarT, 6, 6 > boundary_mask;
-                boundary_mask.fill( 1.0 );
-                if ( r_cell == 0 )
-                {
-                    // Inner boundary (CMB).
-                    for ( int i = 0; i < 6; i++ )
-                    {
-                        for ( int j = 0; j < 6; j++ )
-                        {
-                            if ( i != j && ( i < 3 || j < 3 ) )
-                            {
-                                boundary_mask( i, j ) = 0.0;
-                            }
-                        }
-                    }
-                }
+                constexpr int hex_offset_x[8] = { 0, 1, 0, 1, 0, 1, 0, 1 };
+                constexpr int hex_offset_y[8] = { 0, 0, 1, 1, 0, 0, 1, 1 };
+                constexpr int hex_offset_r[8] = { 0, 0, 0, 0, 1, 1, 1, 1 };
 
-                if ( r_cell + 1 == radii_.extent( 1 ) - 1 )
-                {
-                    // Outer boundary (surface).
-                    for ( int i = 0; i < 6; i++ )
-                    {
-                        for ( int j = 0; j < 6; j++ )
-                        {
-                            if ( i != j && ( i >= 3 || j >= 3 ) )
-                            {
-                                boundary_mask( i, j ) = 0.0;
-                            }
-                        }
-                    }
-                }
-
-                A[wedge].hadamard_product( boundary_mask );
+                Kokkos::atomic_add(
+                    &dst_(
+                        local_subdomain_id,
+                        x_cell + hex_offset_x[i],
+                        y_cell + hex_offset_y[i],
+                        r_cell + hex_offset_r[i],
+                        d ),
+                    dst_local_hex[i][d] );
             }
         }
+    }
 
-        if ( diagonal_ )
-        {
-            A[0] = A[0].diagonal();
-            A[1] = A[1].diagonal();
-        }
+    KOKKOS_INLINE_FUNCTION void neumann(
+        ScalarType                         src_local_hex[8][VecDim],
+        ScalarType                         dst_local_hex[8][VecDim],
+        const int                          wedge,
+        const ScalarType                   quad_weight,
+        const ScalarType                   abs_det,
+        const dense::Vec< ScalarType, 3 >* grad_phy ) const
+    {
+        constexpr int offset_x[2][6] = { { 0, 1, 0, 0, 1, 0 }, { 1, 0, 1, 1, 0, 1 } };
+        constexpr int offset_y[2][6] = { { 0, 0, 1, 0, 0, 1 }, { 1, 1, 0, 1, 1, 0 } };
+        constexpr int offset_r[2][6] = { { 0, 0, 0, 1, 1, 1 }, { 0, 0, 0, 1, 1, 1 } };
 
+        // 3. Compute ∇u at this quadrature point.
+        dense::Vec< ScalarType, 3 > grad_u[VecDim];
         for ( int d = 0; d < VecDim; d++ )
         {
-            dense::Vec< ScalarT, 6 > src[num_wedges_per_hex_cell];
-            extract_local_wedge_vector_coefficients( src, local_subdomain_id, x_cell, y_cell, r_cell, d, src_ );
+            grad_u[d].fill( 0.0 );
+        }
 
-            dense::Vec< ScalarT, 6 > dst[num_wedges_per_hex_cell];
+        for ( int j = 0; j < num_nodes_per_wedge; j++ )
+        {
+            for ( int d = 0; d < VecDim; d++ )
+            {
+                grad_u[d] =
+                    grad_u[d] + src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]][d] *
+                                    grad_phy[j];
+            }
+        }
 
-            dst[0] = A[0] * src[0];
-            dst[1] = A[1] * src[1];
+        // 4. Add the test function contributions.
+        for ( int i = 0; i < num_nodes_per_wedge; i++ )
+        {
+            for ( int d = 0; d < VecDim; d++ )
+            {
+                dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][d] +=
+                    quad_weight * grad_phy[i].dot( grad_u[d] ) * abs_det;
+            }
+        }
+    }
 
-            atomically_add_local_wedge_vector_coefficients( dst_, local_subdomain_id, x_cell, y_cell, r_cell, d, dst );
+    KOKKOS_INLINE_FUNCTION void dirichlet_bot(
+        ScalarType                         src_local_hex[8][VecDim],
+        ScalarType                         dst_local_hex[8][VecDim],
+        const int                          wedge,
+        const ScalarType                   quad_weight,
+        const ScalarType                   abs_det,
+        const dense::Vec< ScalarType, 3 >* grad_phy ) const
+    {
+        constexpr int offset_x[2][6] = { { 0, 1, 0, 0, 1, 0 }, { 1, 0, 1, 1, 0, 1 } };
+        constexpr int offset_y[2][6] = { { 0, 0, 1, 0, 0, 1 }, { 1, 1, 0, 1, 1, 0 } };
+        constexpr int offset_r[2][6] = { { 0, 0, 0, 1, 1, 1 }, { 0, 0, 0, 1, 1, 1 } };
+
+        // 3. Compute ∇u at this quadrature point.
+        dense::Vec< ScalarType, 3 > grad_u[VecDim];
+        for ( int d = 0; d < VecDim; d++ )
+        {
+            grad_u[d].fill( 0.0 );
+        }
+
+        for ( int j = 3; j < num_nodes_per_wedge; j++ )
+        {
+            for ( int d = 0; d < VecDim; d++ )
+            {
+                grad_u[d] =
+                    grad_u[d] + src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]][d] *
+                                    grad_phy[j];
+            }
+        }
+
+        // 4. Add the test function contributions.
+        for ( int i = 3; i < num_nodes_per_wedge; i++ )
+        {
+            for ( int d = 0; d < VecDim; d++ )
+            {
+                dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][d] +=
+                    quad_weight * grad_phy[i].dot( grad_u[d] ) * abs_det;
+            }
+        }
+
+        // Diagonal for top part
+        for ( int i = 0; i < 3; i++ )
+        {
+            for ( int d = 0; d < VecDim; d++ )
+            {
+                const auto grad_u_diag =
+                    src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][d] *
+                    grad_phy[i];
+
+                dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][d] +=
+                    quad_weight * grad_phy[i].dot( grad_u_diag ) * abs_det;
+            }
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION void dirichlet_top(
+        ScalarType                         src_local_hex[8][VecDim],
+        ScalarType                         dst_local_hex[8][VecDim],
+        const int                          wedge,
+        const ScalarType                   quad_weight,
+        const ScalarType                   abs_det,
+        const dense::Vec< ScalarType, 3 >* grad_phy ) const
+    {
+        constexpr int offset_x[2][6] = { { 0, 1, 0, 0, 1, 0 }, { 1, 0, 1, 1, 0, 1 } };
+        constexpr int offset_y[2][6] = { { 0, 0, 1, 0, 0, 1 }, { 1, 1, 0, 1, 1, 0 } };
+        constexpr int offset_r[2][6] = { { 0, 0, 0, 1, 1, 1 }, { 0, 0, 0, 1, 1, 1 } };
+
+        // 3. Compute ∇u at this quadrature point.
+        dense::Vec< ScalarType, 3 > grad_u[VecDim];
+        for ( int d = 0; d < VecDim; d++ )
+        {
+            grad_u[d].fill( 0.0 );
+        }
+
+        for ( int j = 0; j < 3; j++ )
+        {
+            for ( int d = 0; d < VecDim; d++ )
+            {
+                grad_u[d] =
+                    grad_u[d] + src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]][d] *
+                                    grad_phy[j];
+            }
+        }
+
+        // 4. Add the test function contributions.
+        for ( int i = 0; i < 3; i++ )
+        {
+            for ( int d = 0; d < VecDim; d++ )
+            {
+                dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][d] +=
+                    quad_weight * grad_phy[i].dot( grad_u[d] ) * abs_det;
+            }
+        }
+
+        // Diagonal for top part
+        for ( int i = 3; i < num_nodes_per_wedge; i++ )
+        {
+            for ( int d = 0; d < VecDim; d++ )
+            {
+                const auto grad_u_diag =
+                    src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][d] *
+                    grad_phy[i];
+
+                dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][d] +=
+                    quad_weight * grad_phy[i].dot( grad_u_diag ) * abs_det;
+            }
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION void diagonal(
+        ScalarType                         src_local_hex[8][VecDim],
+        ScalarType                         dst_local_hex[8][VecDim],
+        const int                          wedge,
+        const ScalarType                   quad_weight,
+        const ScalarType                   abs_det,
+        const dense::Vec< ScalarType, 3 >* grad_phy ) const
+    {
+        constexpr int offset_x[2][6] = { { 0, 1, 0, 0, 1, 0 }, { 1, 0, 1, 1, 0, 1 } };
+        constexpr int offset_y[2][6] = { { 0, 0, 1, 0, 0, 1 }, { 1, 1, 0, 1, 1, 0 } };
+        constexpr int offset_r[2][6] = { { 0, 0, 0, 1, 1, 1 }, { 0, 0, 0, 1, 1, 1 } };
+
+        // 3. Compute ∇u at this quadrature point.
+        // 4. Add the test function contributions.
+        for ( int i = 0; i < num_nodes_per_wedge; i++ )
+        {
+            for ( int d = 0; d < VecDim; d++ )
+            {
+                const auto grad_u =
+                    src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][d] *
+                    grad_phy[i];
+
+                dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][d] +=
+                    quad_weight * grad_phy[i].dot( grad_u ) * abs_det;
+            }
         }
     }
 };
 
-static_assert( linalg::OperatorLike< VectorLaplace< float, 3 > > );
-static_assert( linalg::OperatorLike< VectorLaplace< double, 3 > > );
+static_assert( linalg::OperatorLike< VectorLaplace< float > > );
+static_assert( linalg::OperatorLike< VectorLaplace< double > > );
 
 } // namespace terra::fe::wedge::operators::shell

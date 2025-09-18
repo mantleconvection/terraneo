@@ -13,7 +13,7 @@
 #include "fe/wedge/operators/shell/restriction_constant.hpp"
 #include "fe/wedge/operators/shell/stokes.hpp"
 #include "fe/wedge/operators/shell/unsteady_advection_diffusion_supg.hpp"
-#include "fe/wedge/operators/shell/vector_laplace.hpp"
+#include "fe/wedge/operators/shell/vector_laplace_simple.hpp"
 #include "fe/wedge/operators/shell/vector_mass.hpp"
 #include "grid/grid_types.hpp"
 #include "grid/shell/spherical_shell.hpp"

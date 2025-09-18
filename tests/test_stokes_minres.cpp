@@ -3,7 +3,7 @@
 #include "../src/terra/communication/shell/communication.hpp"
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/operators/shell/stokes.hpp"
-#include "fe/wedge/operators/shell/vector_laplace.hpp"
+#include "fe/wedge/operators/shell/vector_laplace_simple.hpp"
 #include "fe/wedge/operators/shell/vector_mass.hpp"
 #include "linalg/solvers/pcg.hpp"
 #include "linalg/solvers/pminres.hpp"

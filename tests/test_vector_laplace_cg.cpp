@@ -2,7 +2,7 @@
 
 #include "../src/terra/communication/shell/communication.hpp"
 #include "fe/wedge/integrands.hpp"
-#include "fe/wedge/operators/shell/vector_laplace.hpp"
+#include "fe/wedge/operators/shell/vector_laplace_simple.hpp"
 #include "fe/wedge/operators/shell/vector_mass.hpp"
 #include "linalg/solvers/pcg.hpp"
 #include "linalg/solvers/richardson.hpp"
@@ -145,7 +145,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
         terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
     const auto subdomain_radii = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
 
-    using Laplace = fe::wedge::operators::shell::VectorLaplace< ScalarType, 3 >;
+    using Laplace = fe::wedge::operators::shell::VectorLaplaceSimple< ScalarType, 3 >;
 
     Laplace A( domain, subdomain_shell_coords, subdomain_radii, true, false );
     Laplace A_neumann( domain, subdomain_shell_coords, subdomain_radii, false, false );

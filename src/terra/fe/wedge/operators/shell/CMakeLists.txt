@@ -11,6 +11,7 @@ target_sources(terra
         stokes.hpp
         unsteady_advection_diffusion_supg.hpp
         vector_laplace.hpp
+        vector_laplace_simple.hpp
         vector_mass.hpp
         zero.hpp)
 

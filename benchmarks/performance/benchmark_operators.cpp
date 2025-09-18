@@ -3,7 +3,7 @@
 
 #include "fe/wedge/operators/shell/laplace.hpp"
 #include "fe/wedge/operators/shell/stokes.hpp"
-#include "fe/wedge/operators/shell/vector_laplace.hpp"
+#include "fe/wedge/operators/shell/vector_laplace_simple.hpp"
 #include "linalg/operator.hpp"
 #include "linalg/vector.hpp"
 #include "linalg/vector_q1.hpp"
@@ -19,7 +19,7 @@ using namespace terra;
 
 using fe::wedge::operators::shell::Laplace;
 using fe::wedge::operators::shell::Stokes;
-using fe::wedge::operators::shell::VectorLaplace;
+using fe::wedge::operators::shell::VectorLaplaceSimple;
 using linalg::apply;
 using linalg::DstOf;
 using linalg::OperatorLike;
@@ -165,19 +165,19 @@ BenchmarkData run( const BenchmarkType benchmark, const int level, const int exe
     }
     else if ( benchmark == BenchmarkType::VectorLaplaceFloat )
     {
-        VectorLaplace< float > A( domain, coords_shell_float, coords_radii_float, true, false );
+        VectorLaplaceSimple< float > A( domain, coords_shell_float, coords_radii_float, true, false );
         duration = measure_run_time( executions, A, src_vec_float, dst_vec_float );
         dofs     = dofs_vec;
     }
     else if ( benchmark == BenchmarkType::VectorLaplaceDouble )
     {
-        VectorLaplace< double > A( domain, coords_shell_double, coords_radii_double, true, false );
+        VectorLaplaceSimple< double > A( domain, coords_shell_double, coords_radii_double, true, false );
         duration = measure_run_time( executions, A, src_vec_double, dst_vec_double );
         dofs     = dofs_vec;
     }
     else if ( benchmark == BenchmarkType::VectorLaplaceNeumannDouble )
     {
-        VectorLaplace< double > A( domain, coords_shell_double, coords_radii_double, false, false );
+        VectorLaplaceSimple< double > A( domain, coords_shell_double, coords_radii_double, false, false );
         duration = measure_run_time( executions, A, src_vec_double, dst_vec_double );
         dofs     = dofs_vec;
     }

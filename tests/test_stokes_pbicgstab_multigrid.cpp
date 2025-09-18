@@ -7,7 +7,7 @@
 #include "fe/wedge/operators/shell/prolongation_constant.hpp"
 #include "fe/wedge/operators/shell/restriction_constant.hpp"
 #include "fe/wedge/operators/shell/stokes.hpp"
-#include "fe/wedge/operators/shell/vector_laplace.hpp"
+#include "fe/wedge/operators/shell/vector_laplace_simple.hpp"
 #include "fe/wedge/operators/shell/vector_mass.hpp"
 #include "linalg/solvers/block_preconditioner_2x2.hpp"
 #include "linalg/solvers/jacobi.hpp"
