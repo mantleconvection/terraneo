@@ -7,7 +7,7 @@
 #include "grid/shell/spherical_shell.hpp"
 #include "linalg/operator.hpp"
 #include "linalg/vector_q1isoq2_q1.hpp"
-#include "vector_laplace_simple.hpp"
+#include "vector_laplace.hpp"
 #include "zero.hpp"
 
 namespace terra::fe::wedge::operators::shell {
@@ -20,13 +20,13 @@ class Stokes
     using DstVectorType = linalg::VectorQ1IsoQ2Q1< double, VecDim >;
     using ScalarType    = ScalarT;
 
-    using Block11Type = VectorLaplaceSimple< double, VecDim >;
+    using Block11Type = VectorLaplace< double, VecDim >;
     using Block12Type = Gradient< double >;
     using Block21Type = Divergence< double >;
     using Block22Type = Zero< double >;
 
   private:
-    VectorLaplaceSimple< double, VecDim > A_;
+    VectorLaplace< double, VecDim > A_;
     Gradient< double >              B_T_;
     Divergence< double >            B_;
     Zero< double >                  O_;

@@ -344,8 +344,12 @@ std::pair< double, double > test( int min_level, int max_level, const std::share
 
         inverse_diagonals.emplace_back(
             "inverse_diagonal_" + std::to_string( level ), domains[level], mask_data[level] );
-        linalg::assign( stok_vecs["tmp_3"].block_1(), 1.0 );
-        linalg::apply( A_diag[level], stok_vecs["tmp_3"].block_1(), inverse_diagonals.back() );
+
+        VectorQ1Vec< ScalarType > tmp(
+            "inverse_diagonal_tmp" + std::to_string( level ), domains[level], mask_data[level] );
+
+        linalg::assign( tmp, 1.0 );
+        linalg::apply( A_diag[level], tmp, inverse_diagonals.back() );
         linalg::invert_entries( inverse_diagonals.back() );
 
         if ( level < num_levels - 1 )

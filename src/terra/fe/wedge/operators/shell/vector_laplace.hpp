@@ -82,12 +82,12 @@ class VectorLaplace
         if ( src_.extent( 0 ) != dst_.extent( 0 ) || src_.extent( 1 ) != dst_.extent( 1 ) ||
              src_.extent( 2 ) != dst_.extent( 2 ) || src_.extent( 3 ) != dst_.extent( 3 ) )
         {
-            throw std::runtime_error( "LaplaceSimple: src/dst mismatch" );
+            throw std::runtime_error( "VectorLaplace: src/dst mismatch" );
         }
 
         if ( src_.extent( 1 ) != grid_.extent( 1 ) || src_.extent( 2 ) != grid_.extent( 2 ) )
         {
-            throw std::runtime_error( "LaplaceSimple: src/dst mismatch" );
+            throw std::runtime_error( "VectorLaplace: src/dst mismatch" );
         }
 
         Kokkos::parallel_for( "matvec", grid::shell::local_domain_md_range_policy_cells( domain_ ), *this );
