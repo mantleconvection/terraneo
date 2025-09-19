@@ -167,7 +167,10 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
 
     std::map< std::string, VectorQ1IsoQ2Q1< ScalarType > > stok_vecs;
     std::vector< std::string >                             stok_vec_names = { "u", "f" };
-    constexpr int                                          num_stok_tmps  = 10;
+
+    const auto num_stokes_bicgstab_tmps = 2 * ( prm.stokes_bicgstab_l + 1 ) + 2;
+
+    const auto num_stok_tmps = num_stokes_bicgstab_tmps;
 
     for ( int i = 0; i < num_stok_tmps; i++ )
     {
@@ -333,8 +336,8 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
 
     linalg::solvers::IterativeSolverParameters solver_params{ prm.stokes_bicgstab_max_iterations, 1e-6, 1e-12 };
 
-    std::vector< VectorQ1IsoQ2Q1< ScalarType > > tmp_bicgstab( 8 );
-    for ( int i = 0; i < 8; i++ )
+    std::vector< VectorQ1IsoQ2Q1< ScalarType > > tmp_bicgstab( num_stokes_bicgstab_tmps );
+    for ( int i = 0; i < num_stokes_bicgstab_tmps; i++ )
     {
         tmp_bicgstab[i] = stok_vecs["tmp_" + std::to_string( i )];
     }
