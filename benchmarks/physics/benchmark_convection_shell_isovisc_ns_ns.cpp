@@ -43,7 +43,7 @@ using linalg::VectorQ1IsoQ2Q1;
 using linalg::VectorQ1Scalar;
 using linalg::VectorQ1Vec;
 
-using ScalarType = double;
+using ScalarType = float;
 
 struct Parameters
 {
