@@ -207,9 +207,6 @@ class PBiCGStab
                 }
             }
 
-            std::cout << M << std::endl;
-            std::cout << M0 << std::endl;
-
             gamma = M.fullPivLu().solve( M0 );
 
             for ( int j = 1; j < l_ + 1; ++j )
@@ -228,8 +225,6 @@ class PBiCGStab
             }
 
             omega = gamma( l_ - 1 );
-
-            std::cout << omega << std::endl;
 
             absolute_residual = std::sqrt( dot( residual(), residual() ) );
             relative_residual = absolute_residual / initial_residual;
