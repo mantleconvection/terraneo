@@ -43,7 +43,7 @@ using linalg::VectorQ1IsoQ2Q1;
 using linalg::VectorQ1Scalar;
 using linalg::VectorQ1Vec;
 
-using ScalarType = float;
+using ScalarType = double;
 
 struct Parameters
 {
@@ -322,7 +322,7 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
 
     using PrecVisc = linalg::solvers::Multigrid< Viscous, Prolongation, Restriction, Smoother, CoarseGridSolver >;
     PrecVisc prec_11(
-        P, R, A_c, tmp_mg_r, tmp_mg_e, tmp_mg, smoothers, smoothers, coarse_grid_solver, prm.num_vcycles, 1e-8 );
+        P, R, A_c, tmp_mg_r, tmp_mg_e, tmp_mg, smoothers, smoothers, coarse_grid_solver, prm.num_vcycles, 1e-6 );
 
     using PrecSchur = linalg::solvers::IdentitySolver< Stokes::Block22Type >;
     PrecSchur prec_22;
@@ -333,8 +333,8 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
 
     linalg::solvers::IterativeSolverParameters solver_params{ prm.stokes_bicgstab_max_iterations, 1e-6, 1e-12 };
 
-    std::vector< VectorQ1IsoQ2Q1< ScalarType > > tmp_bicgstab( 10 );
-    for ( int i = 0; i < 10; i++ )
+    std::vector< VectorQ1IsoQ2Q1< ScalarType > > tmp_bicgstab( 8 );
+    for ( int i = 0; i < 8; i++ )
     {
         tmp_bicgstab[i] = stok_vecs["tmp_" + std::to_string( i )];
     }
