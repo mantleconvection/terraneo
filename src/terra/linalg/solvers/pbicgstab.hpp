@@ -248,7 +248,7 @@ class PBiCGStab
                 return;
             }
 
-            if ( absolute_residual / prev_abs_residual < conv_rate_tolerance_ )
+            if ( absolute_residual / prev_abs_residual > conv_rate_tolerance_ )
             {
                 add_table_row( true );
                 return;
