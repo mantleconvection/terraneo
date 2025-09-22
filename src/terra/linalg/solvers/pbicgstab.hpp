@@ -55,6 +55,7 @@ class PBiCGStab
     , tmp_( tmp )
     , tag_( "pbicgstab_solver" )
     , preconditioner_( preconditioner )
+    , conv_rate_tolerance_( std::numeric_limits< ScalarType >::max() )
     {
         const int num_required_tmp_vectors = 2 * ( l + 1 ) + 2;
         if ( tmp.size() < num_required_tmp_vectors )
@@ -73,6 +74,9 @@ class PBiCGStab
     /// @brief Set a tag string for statistics output.
     /// @param tag Tag string.
     void set_tag( const std::string& tag ) { tag_ = tag; }
+
+    /// @brief Sets the convergence rate tolerance. Iteration exits when that tolerance is surpassed.
+    void set_convergence_rate_tolerance( const ScalarType& tolerance ) { conv_rate_tolerance_ = tolerance; }
 
     /// @brief Solve the linear system \( Ax = b \) using PBiCGStab.
     /// Calls the iterative solver and updates statistics.
@@ -226,8 +230,9 @@ class PBiCGStab
 
             omega = gamma( l_ - 1 );
 
-            absolute_residual = std::sqrt( dot( residual(), residual() ) );
-            relative_residual = absolute_residual / initial_residual;
+            const auto prev_abs_residual = absolute_residual;
+            absolute_residual            = std::sqrt( dot( residual(), residual() ) );
+            relative_residual            = absolute_residual / initial_residual;
 
             add_table_row( false );
 
@@ -238,6 +243,12 @@ class PBiCGStab
             }
 
             if ( absolute_residual < params_.absolute_residual_tolerance() )
+            {
+                add_table_row( true );
+                return;
+            }
+
+            if ( absolute_residual / prev_abs_residual < conv_rate_tolerance_ )
             {
                 add_table_row( true );
                 return;
@@ -270,6 +281,8 @@ class PBiCGStab
     std::string tag_; ///< Tag for statistics output.
 
     PreconditionerT preconditioner_; ///< Preconditioner solver.
+
+    ScalarType conv_rate_tolerance_; ///< Exits when the convergence rate surpasses that value.
 };
 
 /// @brief Static assertion: PBiCGStab satisfies SolverLike concept.

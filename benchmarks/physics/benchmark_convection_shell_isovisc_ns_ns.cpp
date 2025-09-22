@@ -43,7 +43,7 @@ using linalg::VectorQ1IsoQ2Q1;
 using linalg::VectorQ1Scalar;
 using linalg::VectorQ1Vec;
 
-using ScalarType = float;
+using ScalarType = double;
 
 struct Parameters
 {
@@ -58,10 +58,17 @@ struct Parameters
 
     ScalarType pseudo_cfl;
     ScalarType t_end;
-    int        max_timesteps;
 
-    int stokes_bicgstab_l;
-    int stokes_bicgstab_max_iterations;
+    int substeps_per_stokes_solve;
+
+    int max_timesteps;
+
+    int        stokes_bicgstab_l;
+    int        stokes_bicgstab_max_iterations;
+    ScalarType stokes_bicgstab_relative_tolerance;
+    ScalarType stokes_bicgstab_absolute_tolerance;
+    ScalarType stokes_bicgstab_conv_rate_tolerance;
+
     int num_vcycles;
     int num_smoothing_steps_prepost;
 
@@ -334,7 +341,10 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
         linalg::solvers::BlockDiagonalPreconditioner2x2< Stokes, Viscous, Stokes::Block22Type, PrecVisc, PrecSchur >;
     PrecStokes prec_stokes( K.block_11(), K.block_22(), prec_11, prec_22 );
 
-    linalg::solvers::IterativeSolverParameters solver_params{ prm.stokes_bicgstab_max_iterations, 1e-6, 1e-12 };
+    linalg::solvers::IterativeSolverParameters solver_params{
+        prm.stokes_bicgstab_max_iterations,
+        prm.stokes_bicgstab_relative_tolerance,
+        prm.stokes_bicgstab_absolute_tolerance };
 
     std::vector< VectorQ1IsoQ2Q1< ScalarType > > tmp_bicgstab( num_stokes_bicgstab_tmps );
     for ( int i = 0; i < num_stokes_bicgstab_tmps; i++ )
@@ -344,6 +354,8 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
 
     linalg::solvers::PBiCGStab< Stokes, PrecStokes > pbicgstab(
         prm.stokes_bicgstab_l, solver_params, table, tmp_bicgstab, prec_stokes );
+
+    pbicgstab.set_convergence_rate_tolerance( prm.stokes_bicgstab_conv_rate_tolerance );
 
     /////////////////////
     /// ENERGY SOLVER ///
@@ -515,38 +527,44 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
         A_neumann.dt()      = dt;
         A_neumann_diag.dt() = dt;
 
-        // Prepping for implicit Euler step.
-        linalg::apply( M_T, T, q );
-
-        // Set up the temperature boundary.
-        assign( temp_vecs["tmp_0"], 0.0 );
-        Kokkos::parallel_for(
-            "boundary temp interpolation",
-            local_domain_md_range_policy_nodes( domains[velocity_level] ),
-            InitialConditionInterpolator(
-                coords_shell[velocity_level], coords_radii[velocity_level], temp_vecs["tmp_0"].grid_data(), true ) );
-
-        Kokkos::fence();
-
-        fe::strong_algebraic_dirichlet_enforcement_poisson_like(
-            A_neumann,
-            A_neumann_diag,
-            temp_vecs["tmp_0"],
-            temp_vecs["tmp_1"],
-            q,
-            mask_data[velocity_level],
-            grid::shell::mask_domain_boundary() );
-
-        if ( mpi::rank() == 0 )
+        for ( int i = 0; i < prm.substeps_per_stokes_solve; i++ )
         {
-            std::cout << "Solving energy ..." << std::endl;
+            // Prepping for implicit Euler step.
+            linalg::apply( M_T, T, q );
+
+            // Set up the temperature boundary.
+            assign( temp_vecs["tmp_0"], 0.0 );
+            Kokkos::parallel_for(
+                "boundary temp interpolation",
+                local_domain_md_range_policy_nodes( domains[velocity_level] ),
+                InitialConditionInterpolator(
+                    coords_shell[velocity_level],
+                    coords_radii[velocity_level],
+                    temp_vecs["tmp_0"].grid_data(),
+                    true ) );
+
+            Kokkos::fence();
+
+            fe::strong_algebraic_dirichlet_enforcement_poisson_like(
+                A_neumann,
+                A_neumann_diag,
+                temp_vecs["tmp_0"],
+                temp_vecs["tmp_1"],
+                q,
+                mask_data[velocity_level],
+                grid::shell::mask_domain_boundary() );
+
+            if ( mpi::rank() == 0 )
+            {
+                std::cout << "Solving energy ..." << std::endl;
+            }
+
+            // Solve energy.
+            solve( energy_solver, A, T, q );
+
+            table->query_rows_equals( "tag", "pbicgstab_solver" ).print_pretty();
+            table->clear();
         }
-
-        // Solve energy.
-        solve( energy_solver, A, T, q );
-
-        table->query_rows_equals( "tag", "pbicgstab_solver" ).print_pretty();
-        table->clear();
 
         // Output stuff, logging etc.
 
@@ -566,7 +584,7 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
             profiles.print_csv( out );
         }
 
-        simulated_time += dt;
+        simulated_time += prm.substeps_per_stokes_solve * dt;
         if ( mpi::rank() == 0 )
         {
             std::cout << "Simulated time: " << simulated_time << " (stopping at " << prm.t_end << ", we're at "
@@ -588,20 +606,25 @@ int main( int argc, char** argv )
     const auto table = std::make_shared< util::Table >();
 
     const Parameters parameters{
-        .min_level                      = args.get< int >( "min-level", 0 ),
-        .max_level                      = args.get< int >( "max-level", 6 ),
-        .r_min                          = 0.5,
-        .r_max                          = 1.0,
-        .diffusivity                    = 1.0,
-        .rayleigh                       = static_cast< ScalarType >( args.get< double >( "rayleigh", 1e5 ) ),
-        .pseudo_cfl                     = static_cast< ScalarType >( args.get< double >( "pseudo-cfl", 0.5 ) ),
-        .t_end                          = 1000.0,
-        .max_timesteps                  = 1000,
-        .stokes_bicgstab_l              = args.get< int >( "stokes-bicgstab-l", 2 ),
-        .stokes_bicgstab_max_iterations = args.get< int >( "stokes-bicgstab-max-iterations", 10 ),
-        .num_vcycles                    = args.get< int >( "num-vcycles", 2 ),
-        .num_smoothing_steps_prepost    = args.get< int >( "num-smooth", 2 ),
-        .xdmf                           = true };
+        .min_level                          = args.get< int >( "min-level", 0 ),
+        .max_level                          = args.get< int >( "max-level", 6 ),
+        .r_min                              = 0.5,
+        .r_max                              = 1.0,
+        .diffusivity                        = 1.0,
+        .rayleigh                           = static_cast< ScalarType >( args.get< double >( "rayleigh", 1e5 ) ),
+        .pseudo_cfl                         = static_cast< ScalarType >( args.get< double >( "pseudo-cfl", 0.5 ) ),
+        .t_end                              = 1000.0,
+        .substeps_per_stokes_solve          = args.get< int >( "substeps-per-stokes-solve", 1 ),
+        .max_timesteps                      = 1000,
+        .stokes_bicgstab_l                  = args.get< int >( "stokes-bicgstab-l", 2 ),
+        .stokes_bicgstab_max_iterations     = args.get< int >( "stokes-bicgstab-max-iterations", 10 ),
+        .stokes_bicgstab_relative_tolerance = 1e-06,
+        .stokes_bicgstab_absolute_tolerance = 1e-12,
+        .stokes_bicgstab_conv_rate_tolerance =
+            static_cast< ScalarType >( args.get< double >( "stokes-bicgstab-conv-rate-tolerance", 0.9 ) ),
+        .num_vcycles                 = args.get< int >( "num-vcycles", 2 ),
+        .num_smoothing_steps_prepost = args.get< int >( "num-smooth", 2 ),
+        .xdmf                        = true };
 
     run( parameters, table );
 
