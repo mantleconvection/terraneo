@@ -16,13 +16,13 @@ class KokkosContext
     KokkosContext( KokkosContext&& )                 = delete;
     KokkosContext& operator=( KokkosContext&& )      = delete;
 
-    static void initialize( int argc, char** argv ) { instance( argc, argv ); }
+    static void initialize( int& argc, char** argv ) { instance( argc, argv ); }
 
   private:
     bool kokkos_initialized_ = false;
 
     // private constructor
-    KokkosContext( int argc, char** argv )
+    KokkosContext( int& argc, char** argv )
     {
         if ( Kokkos::is_initialized() )
         {
@@ -44,7 +44,7 @@ class KokkosContext
     }
 
     // singleton instance accessor
-    static KokkosContext& instance( int argc, char** argv )
+    static KokkosContext& instance( int& argc, char** argv )
     {
         static KokkosContext guard( argc, argv );
         return guard;
