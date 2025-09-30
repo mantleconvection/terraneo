@@ -54,7 +54,7 @@ Note the capitalization: it must be `Kokkos_ENABLE_CUDA=ON`, NOT `KOKKOS_ENABLE_
 - [ ] plates
 - [ ] free-slip
 - [ ] compressible Stokes
-- [ ] FGMRES (BiCGStab works well mostly - but seems to randomly produce NaNs occasionally (not 100% sure if related to the solver but it is very likely))
+- [x] FGMRES (BiCGStab works well mostly - but seems to randomly produce NaNs occasionally (not 100% sure if related to the solver but it is very likely))
 - [ ] Galerkin coarsening
 - [ ] iterative refinement
 - [x] radial layer data assimilation
@@ -70,6 +70,7 @@ Note the capitalization: it must be `Kokkos_ENABLE_CUDA=ON`, NOT `KOKKOS_ENABLE_
 - [ ] particles(?)
 - [x] matrix export / assembly (implemented for debugging - not for actual use)
 - [ ] CPU SIMD kernels
+- [ ] adapt solver ctor like in FGMRES (I think that is the best design)
 
 ### Documentation / cleanup / refactoring
 
