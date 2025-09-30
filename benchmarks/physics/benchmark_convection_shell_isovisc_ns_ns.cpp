@@ -19,6 +19,7 @@
 #include "kernels/common/grid_operations.hpp"
 #include "kokkos/kokkos_wrapper.hpp"
 #include "linalg/solvers/block_preconditioner_2x2.hpp"
+#include "linalg/solvers/fgmres.hpp"
 #include "linalg/solvers/jacobi.hpp"
 #include "linalg/solvers/multigrid.hpp"
 #include "linalg/solvers/pbicgstab.hpp"
@@ -413,14 +414,21 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
 
     Kokkos::fence();
 
-    std::vector< VectorQ1Scalar< ScalarType > > tmp_bicgstab_temp( 8 );
-    for ( int i = 0; i < 8; i++ )
+    const auto                                  num_temp_tmps_energy = 14;
+    std::vector< VectorQ1Scalar< ScalarType > > tmp_gmres( num_temp_tmps_energy );
+    for ( int i = 0; i < num_temp_tmps_energy; i++ )
     {
-        tmp_bicgstab_temp[i] = temp_vecs["tmp_" + std::to_string( i )];
+        tmp_gmres[i] =
+            VectorQ1Scalar< ScalarType >( "tmp_energy_gmres", domains[velocity_level], mask_data[velocity_level] );
     }
 
-    linalg::solvers::PBiCGStab< AD > energy_solver(
-        2, linalg::solvers::IterativeSolverParameters{ 100, 1e-6, 1e-12 }, table, tmp_bicgstab_temp );
+    linalg::solvers::FGMRES< AD > energy_solver(
+        tmp_gmres,
+        { .restart                     = 5,
+          .max_iterations              = 100,
+          .relative_residual_tolerance = 1e-6,
+          .absolute_residual_tolerance = 1e-12 },
+        table );
 
     table->add_row( {
         { "tag", "setup" },
@@ -570,7 +578,7 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
             // Solve energy.
             solve( energy_solver, A, T, q );
 
-            table->query_rows_equals( "tag", "pbicgstab_solver" ).print_pretty();
+            table->query_rows_equals( "tag", "fgmres_solver" ).print_pretty();
             table->clear();
         }
 
@@ -628,7 +636,7 @@ int main( int argc, char** argv )
 
     const Parameters parameters{
         .min_level                      = args.get< int >( "min-level", 0 ),
-        .max_level                      = args.get< int >( "max-level", 6 ),
+        .max_level                      = args.get< int >( "max-level", 4 ),
         .r_min                          = 0.5,
         .r_max                          = 1.0,
         .diffusivity                    = 1.0,

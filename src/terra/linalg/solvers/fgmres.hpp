@@ -227,9 +227,6 @@ class FGMRES
                 const ScalarType abs_res = std::abs( g( j + 1 ) );
                 const ScalarType rel_res = abs_res / initial_residual;
 
-                // Debug output (can be removed or conditioned on a verbosity flag)
-                std::cout << "[FGMRES] iter " << total_iters << " |r| = " << abs_res << std::endl;
-
                 if ( statistics_ )
                 {
                     statistics_->add_row(
@@ -273,9 +270,6 @@ class FGMRES
             apply( A, x, r );
             lincomb( r, { 1.0, -1.0 }, { b, r } );
             beta0 = std::sqrt( dot( r, r ) );
-
-            // Debug output (can be removed or conditioned on a verbosity flag)
-            std::cout << "[FGMRES] restart end |r| = " << beta0 << std::endl;
 
             // Check for final convergence
             if ( beta0 <= options_.absolute_residual_tolerance ||
