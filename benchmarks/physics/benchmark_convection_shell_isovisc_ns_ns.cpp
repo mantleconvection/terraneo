@@ -149,6 +149,41 @@ struct RHSVelocityInterpolator
     }
 };
 
+struct NoiseAdder
+{
+    Grid3DDataVec< ScalarType, 3 >   grid_;
+    Grid2DDataScalar< ScalarType >   radii_;
+    Grid4DDataScalar< ScalarType >   data_T_;
+    Kokkos::Random_XorShift64_Pool<> rand_pool_;
+
+    NoiseAdder(
+        const Grid3DDataVec< ScalarType, 3 >& grid,
+        const Grid2DDataScalar< ScalarType >& radii,
+        const Grid4DDataScalar< ScalarType >& data_T )
+    : grid_( grid )
+    , radii_( radii )
+    , data_T_( data_T )
+    , rand_pool_( 12345 )
+    {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
+    {
+        auto generator = rand_pool_.get_state();
+
+        const ScalarType eps         = 1e-2;
+        const auto       pertubation = eps * ( 2.0 * generator.drand() - 1.0 );
+
+        if ( !( r == 0 || r == radii_.extent( 1 ) - 1 ) )
+        {
+            data_T_( local_subdomain_id, x, y, r ) =
+                Kokkos::clamp( data_T_( local_subdomain_id, x, y, r ) + pertubation, 0.0, 1.0 );
+        }
+
+        rand_pool_.free_state( generator );
+    }
+};
+
 void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
 {
     // Set up domains for all levels.
@@ -414,6 +449,11 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
 
     Kokkos::fence();
 
+    Kokkos::parallel_for(
+        "adding noise to temp",
+        local_domain_md_range_policy_nodes( domains[velocity_level] ),
+        NoiseAdder( coords_shell[velocity_level], coords_radii[velocity_level], T.grid_data() ) );
+
     const auto                                  num_temp_tmps_energy = 14;
     std::vector< VectorQ1Scalar< ScalarType > > tmp_gmres( num_temp_tmps_energy );
     for ( int i = 0; i < num_temp_tmps_energy; i++ )
@@ -425,9 +465,9 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
     linalg::solvers::FGMRES< AD > energy_solver(
         tmp_gmres,
         { .restart                     = 5,
-          .max_iterations              = 100,
           .relative_residual_tolerance = 1e-6,
-          .absolute_residual_tolerance = 1e-12 },
+          .absolute_residual_tolerance = 1e-12,
+          .max_iterations              = 100 },
         table );
 
     table->add_row( {
