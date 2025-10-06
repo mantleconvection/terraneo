@@ -151,18 +151,21 @@ struct RHSVelocityInterpolator
 
 struct NoiseAdder
 {
-    Grid3DDataVec< ScalarType, 3 >   grid_;
-    Grid2DDataScalar< ScalarType >   radii_;
-    Grid4DDataScalar< ScalarType >   data_T_;
-    Kokkos::Random_XorShift64_Pool<> rand_pool_;
+    Grid3DDataVec< ScalarType, 3 >     grid_;
+    Grid2DDataScalar< ScalarType >     radii_;
+    Grid4DDataScalar< ScalarType >     data_T_;
+    Grid4DDataScalar< util::MaskType > mask_;
+    Kokkos::Random_XorShift64_Pool<>   rand_pool_;
 
     NoiseAdder(
-        const Grid3DDataVec< ScalarType, 3 >& grid,
-        const Grid2DDataScalar< ScalarType >& radii,
-        const Grid4DDataScalar< ScalarType >& data_T )
+        const Grid3DDataVec< ScalarType, 3 >&     grid,
+        const Grid2DDataScalar< ScalarType >&     radii,
+        const Grid4DDataScalar< ScalarType >&     data_T,
+        const Grid4DDataScalar< util::MaskType >& mask )
     : grid_( grid )
     , radii_( radii )
     , data_T_( data_T )
+    , mask_( mask )
     , rand_pool_( 12345 )
     {}
 
@@ -171,13 +174,19 @@ struct NoiseAdder
     {
         auto generator = rand_pool_.get_state();
 
-        const ScalarType eps         = 1e-2;
+        const ScalarType eps         = 1e-1;
         const auto       pertubation = eps * ( 2.0 * generator.drand() - 1.0 );
 
-        if ( !( r == 0 || r == radii_.extent( 1 ) - 1 ) )
+        // if ( !( r == 0 || r == radii_.extent( 1 ) - 1 ) )
+        if ( util::check_bits( mask_( local_subdomain_id, x, y, r ), grid::mask_owned() ) )
         {
             data_T_( local_subdomain_id, x, y, r ) =
                 Kokkos::clamp( data_T_( local_subdomain_id, x, y, r ) + pertubation, 0.0, 1.0 );
+            // data_T_( local_subdomain_id, x, y, r ) += pertubation;
+        }
+        else
+        {
+            data_T_( local_subdomain_id, x, y, r ) = 0.0;
         }
 
         rand_pool_.free_state( generator );
@@ -452,7 +461,11 @@ void run( const Parameters& prm, const std::shared_ptr< util::Table >& table )
     Kokkos::parallel_for(
         "adding noise to temp",
         local_domain_md_range_policy_nodes( domains[velocity_level] ),
-        NoiseAdder( coords_shell[velocity_level], coords_radii[velocity_level], T.grid_data() ) );
+        NoiseAdder(
+            coords_shell[velocity_level], coords_radii[velocity_level], T.grid_data(), mask_data[velocity_level] ) );
+
+    communication::shell::send_recv(
+        domains[velocity_level], T.grid_data(), communication::shell::CommuncationReduction::SUM );
 
     const auto                                  num_temp_tmps_energy = 14;
     std::vector< VectorQ1Scalar< ScalarType > > tmp_gmres( num_temp_tmps_energy );
