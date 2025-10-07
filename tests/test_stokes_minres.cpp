@@ -382,6 +382,7 @@ int main( int argc, char** argv )
             }
 
             table->add_row( { { "level", level }, { "order_vel", order_vel }, { "order_pre", order_pre } } );
+            table->print_pretty();
         }
         prev_l2_error_vel = l2_error_vel;
         prev_l2_error_pre = l2_error_pre;

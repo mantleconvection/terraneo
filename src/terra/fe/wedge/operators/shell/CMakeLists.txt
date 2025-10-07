@@ -13,5 +13,6 @@ target_sources(terra
         vector_laplace.hpp
         vector_laplace_simple.hpp
         vector_mass.hpp
+        div_k_grad.hpp
         zero.hpp)
 
