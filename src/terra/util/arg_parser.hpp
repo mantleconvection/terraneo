@@ -86,7 +86,7 @@ namespace terra::util {
 /// e = true
 /// @endcode
 ///
-class ArgParser
+class [[deprecated("Use CLI11 - see test_arg_parser.cpp")]] ArgParser
 {
   public:
     using Scalar = std::variant< int, double, std::string, bool >;
@@ -172,10 +172,22 @@ class ArgParser
         return get< T >( key );
     }
 
-    bool has( const std::string& key ) const { return args.find( key ) != args.end(); }
+    [[nodiscard]] bool has( const std::string& key ) const { return args.find( key ) != args.end(); }
 
-    auto begin() const { return args.begin(); }
-    auto end() const { return args.end(); }
+    template < typename T >
+    [[nodiscard]] bool has_typed( const std::string& key ) const
+    {
+        auto it = args.find( key );
+        if ( it == args.end() )
+        {
+            return false;
+        }
+
+        return std::holds_alternative< T >( it->second );
+    }
+
+    [[nodiscard]] auto begin() const { return args.begin(); }
+    [[nodiscard]] auto end() const { return args.end(); }
 
     void print( std::ostream& os = std::cout ) const
     {
