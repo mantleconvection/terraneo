@@ -61,7 +61,7 @@ struct SolutionInterpolator
                 2 * Kokkos::sin( 2 * coords( 1 ) ) * Kokkos::sin( 2 * coords( 2 ) ) * Kokkos::sinh( coords( 0 ) );
             data_( local_subdomain_id, x, y, r, 2 ) =
                 4 * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sin( 2 * coords( 1 ) ) * Kokkos::sinh( coords( 2 ) );
-                
+
             /*const double value = ( 1.0 / 2.0 ) * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) ) *
                                  Kokkos::sin( 2 * coords( 2 ) );
             data_( local_subdomain_id, x, y, r, 0 ) = value;
@@ -117,62 +117,61 @@ struct RHSInterpolator
     {
         const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
 
-        
         // x component of rhs
         {
-        const real_t x0  = Kokkos::sinh( coords( 1 ) );
-        const real_t x1  = Kokkos::sin( coords( 2 ) ) + 2;
-        const real_t x2  = 2 * coords( 0 );
-        const real_t x3  = Kokkos::sin( x2 );
-        const real_t x4  = 2 * coords( 2 );
-        const real_t x5  = Kokkos::sin( x4 );
-        const real_t x6  = x0 * x3;
-        const real_t x7  = Kokkos::cos( x2 );
-        const real_t x8  = 2 * coords( 1 );
-        const real_t x9  = Kokkos::sin( x8 );
-        const real_t x10 = x5 * x6;
-        const real_t x11 = 2 * x1;
-        data_( local_subdomain_id, x, y, r, 0 ) =
-            8.0 * x0 * x1 * x3 * x5 - x11 * ( -2.0 * x10 + 4.0 * x7 * x9 * Kokkos::cosh( coords( 2 ) ) ) -
-            x11 * ( 0.5 * x10 + 2.0 * x5 * Kokkos::cos( x8 ) * std::cosh( coords( 0 ) ) ) -
-            2 * ( 1.0 * x6 * Kokkos::cos( x4 ) + 4.0 * x7 * x9 * Kokkos::sinh( coords( 2 ) ) ) *
-                Kokkos::cos( coords( 2 ) );
+            const real_t x0  = Kokkos::sinh( coords( 1 ) );
+            const real_t x1  = Kokkos::sin( coords( 2 ) ) + 2;
+            const real_t x2  = 2 * coords( 0 );
+            const real_t x3  = Kokkos::sin( x2 );
+            const real_t x4  = 2 * coords( 2 );
+            const real_t x5  = Kokkos::sin( x4 );
+            const real_t x6  = x0 * x3;
+            const real_t x7  = Kokkos::cos( x2 );
+            const real_t x8  = 2 * coords( 1 );
+            const real_t x9  = Kokkos::sin( x8 );
+            const real_t x10 = x5 * x6;
+            const real_t x11 = 2 * x1;
+            data_( local_subdomain_id, x, y, r, 0 ) =
+                8.0 * x0 * x1 * x3 * x5 - x11 * ( -2.0 * x10 + 4.0 * x7 * x9 * Kokkos::cosh( coords( 2 ) ) ) -
+                x11 * ( 0.5 * x10 + 2.0 * x5 * Kokkos::cos( x8 ) * std::cosh( coords( 0 ) ) ) -
+                2 * ( 1.0 * x6 * Kokkos::cos( x4 ) + 4.0 * x7 * x9 * Kokkos::sinh( coords( 2 ) ) ) *
+                    Kokkos::cos( coords( 2 ) );
         }
 
         // y component of rhs
         {
-        const real_t x0  = Kokkos::sinh( coords( 0 ) );
-        const real_t x1  = Kokkos::sin( coords( 2 ) ) + 2;
-        const real_t x2  = 2 * coords( 1 );
-        const real_t x3  = Kokkos::sin( x2 );
-        const real_t x4  = 2 * coords( 2 );
-        const real_t x5  = Kokkos::sin( x4 );
-        const real_t x6  = 2 * coords( 0 );
-        const real_t x7  = 4.0 * Kokkos::sin( x6 ) * Kokkos::cos( x2 );
-        const real_t x8  = x0 * x3;
-        const real_t x9  = 2 * x1;
-        const real_t x10 = 1.0 * x5;
-        data_( local_subdomain_id, x, y, r, 1 ) =
-            16.0 * x0 * x1 * x3 * x5 - x9 * ( x10 * x8 + x10 * Kokkos::cos( x6 ) * Kokkos::cosh( coords( 1 ) ) ) -
-            x9 * ( -4.0 * x5 * x8 + x7 * Kokkos::cosh( coords( 2 ) ) ) -
-            2 * ( x7 * Kokkos::sinh( coords( 2 ) ) + 2.0 * x8 * Kokkos::cos( x4 ) ) * Kokkos::cos( coords( 2 ) );
+            const real_t x0  = Kokkos::sinh( coords( 0 ) );
+            const real_t x1  = Kokkos::sin( coords( 2 ) ) + 2;
+            const real_t x2  = 2 * coords( 1 );
+            const real_t x3  = Kokkos::sin( x2 );
+            const real_t x4  = 2 * coords( 2 );
+            const real_t x5  = Kokkos::sin( x4 );
+            const real_t x6  = 2 * coords( 0 );
+            const real_t x7  = 4.0 * Kokkos::sin( x6 ) * Kokkos::cos( x2 );
+            const real_t x8  = x0 * x3;
+            const real_t x9  = 2 * x1;
+            const real_t x10 = 1.0 * x5;
+            data_( local_subdomain_id, x, y, r, 1 ) =
+                16.0 * x0 * x1 * x3 * x5 - x9 * ( x10 * x8 + x10 * Kokkos::cos( x6 ) * Kokkos::cosh( coords( 1 ) ) ) -
+                x9 * ( -4.0 * x5 * x8 + x7 * Kokkos::cosh( coords( 2 ) ) ) -
+                2 * ( x7 * Kokkos::sinh( coords( 2 ) ) + 2.0 * x8 * Kokkos::cos( x4 ) ) * Kokkos::cos( coords( 2 ) );
         }
 
         // z component of rhs
         {
-        const real_t x0 = 2 * coords( 0 );
-        const real_t x1 = 2 * coords( 1 );
-        const real_t x2 = 8.0 * Kokkos::sin( x0 ) * Kokkos::sin( x1 );
-        const real_t x3 = Kokkos::sin( coords( 2 ) ) + 2;
-        const real_t x4 = x2 * Kokkos::sinh( coords( 2 ) );
-        const real_t x5 = Kokkos::cos( 2 * coords( 2 ) );
-        const real_t x6 = 2 * x3;
-        data_( local_subdomain_id, x, y, r, 2 ) =
-            -x2 * Kokkos::cos( coords( 2 ) ) * Kokkos::cosh( coords( 2 ) ) - x3 * x4 -
-            x6 * ( -x4 + 2.0 * x5 * Kokkos::cos( x0 ) * Kokkos::sinh( coords( 1 ) ) ) -
-            x6 * ( -x4 + 4.0 * x5 * Kokkos::cos( x1 ) * Kokkos::sinh( coords( 0 ) ) );
+            const real_t x0 = 2 * coords( 0 );
+            const real_t x1 = 2 * coords( 1 );
+            const real_t x2 = 8.0 * Kokkos::sin( x0 ) * Kokkos::sin( x1 );
+            const real_t x3 = Kokkos::sin( coords( 2 ) ) + 2;
+            const real_t x4 = x2 * Kokkos::sinh( coords( 2 ) );
+            const real_t x5 = Kokkos::cos( 2 * coords( 2 ) );
+            const real_t x6 = 2 * x3;
+            data_( local_subdomain_id, x, y, r, 2 ) =
+                -x2 * Kokkos::cos( coords( 2 ) ) * Kokkos::cosh( coords( 2 ) ) - x3 * x4 -
+                x6 * ( -x4 + 2.0 * x5 * Kokkos::cos( x0 ) * Kokkos::sinh( coords( 1 ) ) ) -
+                x6 * ( -x4 + 4.0 * x5 * Kokkos::cos( x1 ) * Kokkos::sinh( coords( 0 ) ) );
         }
-            
+
         /*const double x0    = 2 * coords( 2 );
         const double x1    = Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
         const double value = 3.5 * x1 * ( Kokkos::sin( coords( 2 ) ) + 2 ) * Kokkos::sin( x0 ) -

@@ -135,17 +135,16 @@ class EpsilonSimple
         dense::Vec< ScalarT, 6 > k[num_wedges_per_hex_cell];
         extract_local_wedge_scalar_coefficients( k, local_subdomain_id, x_cell, y_cell, r_cell, k_ );
 
+        // Compute the local element matrix.
+        dense::Mat< ScalarT, 18, 18 > A[num_wedges_per_hex_cell] = {};
+
         // FE dimensions: velocity coupling components of epsilon operator
         for ( int dimi = 0; dimi < 3; ++dimi )
         {
             for ( int dimj = 0; dimj < 3; ++dimj )
             {
-                //if ( diagonal_ and ( dimi != dimj ) )
                 if ( diagonal_ and dimi != dimj )
                     continue;
-
-                // Compute the local element matrix.
-                dense::Mat< ScalarT, 6, 6 > A[num_wedges_per_hex_cell] = {};
 
                 // spatial dimensions: quadrature points and wedge
                 for ( int q = 0; q < num_quad_points; q++ )
@@ -183,18 +182,24 @@ class EpsilonSimple
 
                                 //const auto grad_j = J_inv_transposed * grad_shape( j, quad_points[q] );
 
-                                A[wedge]( i, j ) +=
-                                    0.5 * w * k_eval * ( ( sym_grad_i ).double_contract( sym_grad_j ) * abs_det );
+                                A[wedge]( i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) +=
+                                    w * k_eval * ( ( sym_grad_i ).double_contract( sym_grad_j ) * abs_det );
                             }
                         }
                     }
                 }
+            }
+        }
 
-                if ( treat_boundary_ )
+        if ( treat_boundary_ )
+        {
+            for ( int dimi = 0; dimi < 3; ++dimi )
+            {
+                for ( int dimj = 0; dimj < 3; ++dimj )
                 {
                     for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
                     {
-                        dense::Mat< ScalarT, 6, 6 > boundary_mask;
+                        dense::Mat< ScalarT, 18, 18 > boundary_mask;
                         boundary_mask.fill( 1.0 );
 
                         if ( r_cell == 0 )
@@ -209,7 +214,8 @@ class EpsilonSimple
                                     {
                                         if ( i != j && ( i < 3 || j < 3 ) )
                                         {
-                                            boundary_mask( i, j ) = 0.0;
+                                            boundary_mask(
+                                                i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
                                         }
                                     }
                                 }
@@ -221,9 +227,10 @@ class EpsilonSimple
                                 {
                                     for ( int j = 0; j < 6; j++ )
                                     {
-                                        if ( i < 3 )
+                                        if ( i < 3 || j < 3 )
                                         {
-                                            boundary_mask( i, j ) = 0.0;
+                                            boundary_mask(
+                                                i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
                                         }
                                     }
                                 }
@@ -235,9 +242,10 @@ class EpsilonSimple
                                 {
                                     for ( int j = 0; j < 6; j++ )
                                     {
-                                        if ( j < 3 )
+                                        if ( j < 3 || i < 3  )
                                         {
-                                            boundary_mask( i, j ) = 0.0;
+                                            boundary_mask(
+                                                i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
                                         }
                                     }
                                 }
@@ -256,7 +264,8 @@ class EpsilonSimple
                                     {
                                         if ( i != j && ( i >= 3 || j >= 3 ) )
                                         {
-                                            boundary_mask( i, j ) = 0.0;
+                                            boundary_mask(
+                                                i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
                                         }
                                     }
                                 }
@@ -268,9 +277,10 @@ class EpsilonSimple
                                 {
                                     for ( int j = 0; j < 6; j++ )
                                     {
-                                        if ( i >= 3 )
+                                        if ( i >= 3 || j >= 3 )
                                         {
-                                            boundary_mask( i, j ) = 0.0;
+                                            boundary_mask(
+                                                i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
                                         }
                                     }
                                 }
@@ -282,9 +292,10 @@ class EpsilonSimple
                                 {
                                     for ( int j = 0; j < 6; j++ )
                                     {
-                                        if ( j >= 3 )
+                                        if ( i >= 3 ||j >= 3 )
                                         {
-                                            boundary_mask( i, j ) = 0.0;
+                                            boundary_mask(
+                                                i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
                                         }
                                     }
                                 }
@@ -294,24 +305,45 @@ class EpsilonSimple
                         A[wedge].hadamard_product( boundary_mask );
                     }
                 }
-
-                if ( diagonal_ )
-                {
-                    A[0] = A[0].diagonal();
-                    A[1] = A[1].diagonal();
-                }
-
-                dense::Vec< ScalarT, 6 > src[num_wedges_per_hex_cell];
-                extract_local_wedge_vector_coefficients( src, local_subdomain_id, x_cell, y_cell, r_cell, dimj, src_ );
-
-                dense::Vec< ScalarT, 6 > dst[num_wedges_per_hex_cell];
-
-                dst[0] = A[0] * src[0];
-                dst[1] = A[1] * src[1];
-
-                atomically_add_local_wedge_vector_coefficients(
-                    dst_, local_subdomain_id, x_cell, y_cell, r_cell, dimi, dst );
             }
+        }
+
+        if ( diagonal_ )
+        {
+            A[0] = A[0].diagonal();
+            A[1] = A[1].diagonal();
+        }
+
+        dense::Vec< ScalarT, 18 > src[num_wedges_per_hex_cell];
+        for ( int dimj = 0; dimj < 3; dimj++ )
+        {
+            dense::Vec< ScalarT, 6 > src_d[num_wedges_per_hex_cell];
+            extract_local_wedge_vector_coefficients( src_d, local_subdomain_id, x_cell, y_cell, r_cell, dimj, src_ );
+
+            for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
+            {
+                for ( int i = 0; i < num_nodes_per_wedge; i++ )
+                {
+                    src[wedge]( dimj * num_nodes_per_wedge + i ) = src_d[wedge]( i );
+                }
+            }
+        }
+        //extract_local_wedge_vector_coefficients( src, local_subdomain_id, x_cell, y_cell, r_cell, dimj, src_ );
+
+        dense::Vec< ScalarT, 18 > dst[num_wedges_per_hex_cell];
+
+        dst[0] = A[0] * src[0];
+        dst[1] = A[1] * src[1];
+
+        //atomically_add_local_wedge_vector_coefficients( dst_, local_subdomain_id, x_cell, y_cell, r_cell, dimi, dst );
+        for ( int dimi = 0; dimi < 3; dimi++ )
+        {
+            dense::Vec< ScalarT, 6 > dst_d[num_wedges_per_hex_cell];
+            dst_d[0] = dst[0].template slice< 6 >( dimi * num_nodes_per_wedge );
+            dst_d[1] = dst[1].template slice< 6 >( dimi * num_nodes_per_wedge );
+
+            atomically_add_local_wedge_vector_coefficients(
+                dst_, local_subdomain_id, x_cell, y_cell, r_cell, dimi, dst_d );
         }
     }
 };
