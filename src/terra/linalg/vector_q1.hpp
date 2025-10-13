@@ -42,11 +42,11 @@ inline grid::Grid4DDataScalar< util::MaskType > setup_mask_data( const grid::she
     }
 
     // Communicate and reduce with minimum.
-    terra::communication::shell::pack_and_send_local_subdomain_boundaries(
+    terra::communication::shell::pack_send_and_recv_local_subdomain_boundaries(
         domain, tmp_data_for_global_subdomain_indices, send_buffers, recv_buffers );
 
-    terra::communication::shell::recv_unpack_and_add_local_subdomain_boundaries(
-        domain, tmp_data_for_global_subdomain_indices, recv_buffers, communication::shell::CommuncationReduction::MIN );
+    terra::communication::shell::unpack_and_reduce_local_subdomain_boundaries(
+        domain, tmp_data_for_global_subdomain_indices, recv_buffers, communication::shell::CommunicationReduction::MIN );
 
     // Set all nodes to 1 if the global_subdomain_id matches - 0 otherwise.
     for ( const auto& [subdomain_info, value] : domain.subdomains() )

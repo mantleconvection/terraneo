@@ -91,9 +91,9 @@ class Divergence
         {
             util::Timer timer_comm( "divergence_comm" );
 
-            communication::shell::pack_and_send_local_subdomain_boundaries(
+            communication::shell::pack_send_and_recv_local_subdomain_boundaries(
                 domain_coarse_, dst_, send_buffers_, recv_buffers_ );
-            communication::shell::recv_unpack_and_add_local_subdomain_boundaries( domain_coarse_, dst_, recv_buffers_ );
+            communication::shell::unpack_and_reduce_local_subdomain_boundaries( domain_coarse_, dst_, recv_buffers_ );
         }
     }
 

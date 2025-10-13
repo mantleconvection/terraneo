@@ -114,7 +114,7 @@ Eigen::SparseMatrix< double > debug_sparse_assembly_operator_vec_q1_scalar(
                     tmp_src.grid_data()( idx_0, idx_1, idx_2, idx_3 ) = 1.0;
 
                     communication::shell::send_recv(
-                        domain_src, tmp_src.grid_data(), communication::shell::CommuncationReduction::MAX );
+                        domain_src, tmp_src.grid_data(), communication::shell::CommunicationReduction::MAX );
 
                     linalg::apply( A, tmp_src, tmp_dst );
 

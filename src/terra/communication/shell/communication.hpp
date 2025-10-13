@@ -16,22 +16,33 @@ constexpr int MPI_TAG_BOUNDARY_DATA = 100;
 
 /// @brief Send and receive buffers for all process-local subdomain boundaries.
 ///
-/// Allocates views only for all boundaries of local subdomains. Those are the nodes that overlap with values from
+/// Allocates views for all boundaries of local subdomains. Those are the nodes that overlap with values from
 /// neighboring subdomains.
 ///
 /// One buffer per local boundary + neighbor is allocated. So, for instance, for an edge shared with several
-/// neighbors, just as many buffers are allocated. This way we can parallelize the send- and recv-scheduling easily.
+/// neighbors, just as many buffers as neighbors are allocated. This facilitates the receiving step since all
+/// neighbors that a subdomain receives data from can send their data simultaneously.
 ///
 /// Can be reused after communication (send + recv) has been completed to avoid unnecessary reallocation.
 template < typename ScalarType, int VecDim = 1 >
 class SubdomainNeighborhoodSendRecvBuffer
 {
   public:
+    /// @brief Constructs a SubdomainNeighborhoodSendRecvBuffer for the passed distributed domain object.
     explicit SubdomainNeighborhoodSendRecvBuffer( const grid::shell::DistributedDomain& domain )
     {
         setup_buffers( domain );
     }
 
+    /// @brief Const reference to the view that is a buffer for an edge of a subdomain.
+    ///
+    /// @param local_subdomain the SubdomainInfo identifying the local subdomain
+    /// @param local_boundary_edge the boundary edge of the local subdomain
+    /// @param neighbor_subdomain the SubdomainInfo identifying the neighboring subdomain
+    /// @param neighbor_boundary_edge the boundary edge of the neighboring subdomain
+    ///
+    /// @return A const ref to a Kokkos::View with shape (N, VecDim), where N is the number of grid nodes on the edge
+    ///         and VecDim is the number of scalars per node (class template parameter).
     const grid::Grid1DDataVec< ScalarType, VecDim >& buffer_edge(
         const grid::shell::SubdomainInfo& local_subdomain,
         const grid::BoundaryEdge          local_boundary_edge,
@@ -41,6 +52,15 @@ class SubdomainNeighborhoodSendRecvBuffer
         return buffers_edge_.at( { local_subdomain, local_boundary_edge, neighbor_subdomain, neighbor_boundary_edge } );
     }
 
+    /// @brief Const reference to the view that is a buffer for a face of a subdomain.
+    ///
+    /// @param local_subdomain the SubdomainInfo identifying the local subdomain
+    /// @param local_boundary_face the boundary face of the local subdomain
+    /// @param neighbor_subdomain the SubdomainInfo identifying the neighboring subdomain
+    /// @param neighbor_boundary_face the boundary face of the neighboring subdomain
+    ///
+    /// @return A const ref to a Kokkos::View with shape (N, M, VecDim), where N, M are the number of grid nodes on
+    ///         each side of the face and VecDim is the number of scalars per node (class template parameter).
     const grid::Grid2DDataVec< ScalarType, VecDim >& buffer_face(
         const grid::shell::SubdomainInfo& local_subdomain,
         const grid::BoundaryFace          local_boundary_face,
@@ -51,6 +71,7 @@ class SubdomainNeighborhoodSendRecvBuffer
     }
 
   private:
+    /// @brief Helper called in the ctor that allocates the buffers.
     void setup_buffers( const grid::shell::DistributedDomain& domain )
     {
         for ( const auto& [subdomain_info, data] : domain.subdomains() )
@@ -111,28 +132,41 @@ class SubdomainNeighborhoodSendRecvBuffer
         buffers_face_;
 };
 
-struct RecvRequestBoundaryInfo
+/// @brief Communication reduction modes.
+enum class CommunicationReduction
 {
-    grid::shell::SubdomainInfo                                                   sender_subdomain_info;
-    std::variant< grid::BoundaryVertex, grid::BoundaryEdge, grid::BoundaryFace > sender_local_boundary;
-    grid::shell::SubdomainInfo                                                   receiver_subdomain_info;
-    std::variant< grid::BoundaryVertex, grid::BoundaryEdge, grid::BoundaryFace > receiver_local_boundary;
-};
-
-enum class CommuncationReduction
-{
+    /// Sums up the node values during receive.
     SUM,
+
+    /// Stores the min of all received values during receive.
     MIN,
+
+    /// Stores the max of all received values during receive.
     MAX,
 };
 
 /// @brief Packs, sends and recvs local subdomain boundaries using two sets of buffers.
 ///
+/// @note Must be complemented with `unpack_and_reduce_local_subdomain_boundaries()` to complete communication.
+///
+/// Waits until all recv buffers are filled - but does not unpack.
+///
+/// Performs "additive" communication. Nodes at the subdomain interfaces overlap and will be reduced using some
+/// reduction mode during the receiving phase. This is typically required for matrix-free matrix-vector multiplications
+/// in a finite element context: nodes that are shared by elements of two neighboring subdomains receive contributions
+/// from both subdomains that need to be added. In this case, the required reduction mode is `CommunicationReduction::SUM`.
+///
 /// The send buffers are only required until this function returns.
-/// The recv buffers must be passed to the corresponding unpacking function
-/// recv_unpack_and_add_local_subdomain_boundaries().
+/// The recv buffers must be passed to the corresponding unpacking function `recv_unpack_and_add_local_subdomain_boundaries()`.
+///
+/// @param domain the DistributedDomain that this works on
+/// @param data the data (Kokkos::View) to be communicated
+/// @param boundary_send_buffers SubdomainNeighborhoodSendRecvBuffer instance that serves for sending data - can be
+///                              reused after this function returns
+/// @param boundary_recv_buffers SubdomainNeighborhoodSendRecvBuffer instance that serves for receiving data - must be
+///                              passed to `unpack_and_reduce_local_subdomain_boundaries()`
 template < typename GridDataType >
-void pack_and_send_local_subdomain_boundaries(
+void pack_send_and_recv_local_subdomain_boundaries(
     const grid::shell::DistributedDomain& domain,
     const GridDataType&                   data,
     SubdomainNeighborhoodSendRecvBuffer< typename GridDataType::value_type, grid::grid_data_vec_dim< GridDataType >() >&
@@ -490,18 +524,19 @@ void pack_and_send_local_subdomain_boundaries(
 
 namespace detail {
 
+/// @brief Helper function to defer to the respective Kokkos::atomic_xxx() reduction function.
 template < typename T >
-KOKKOS_INLINE_FUNCTION void reduction_function( T* ptr, const T& val, const CommuncationReduction reduction_type )
+KOKKOS_INLINE_FUNCTION void reduction_function( T* ptr, const T& val, const CommunicationReduction reduction_type )
 {
-    if ( reduction_type == CommuncationReduction::SUM )
+    if ( reduction_type == CommunicationReduction::SUM )
     {
         Kokkos::atomic_add( ptr, val );
     }
-    else if ( reduction_type == CommuncationReduction::MIN )
+    else if ( reduction_type == CommunicationReduction::MIN )
     {
         Kokkos::atomic_min( ptr, val );
     }
-    else if ( reduction_type == CommuncationReduction::MAX )
+    else if ( reduction_type == CommunicationReduction::MAX )
     {
         Kokkos::atomic_max( ptr, val );
     }
@@ -511,14 +546,20 @@ KOKKOS_INLINE_FUNCTION void reduction_function( T* ptr, const T& val, const Comm
 
 /// @brief Unpacks and reduces local subdomain boundaries.
 ///
-/// The recv buffers must be the same instances as used during sending.
+/// The recv buffers must be the same instances as used during sending in `pack_send_and_recv_local_subdomain_boundaries()`.
+///
+/// @param domain the DistributedDomain that this works on
+/// @param data the data (Kokkos::View) to be communicated
+/// @param boundary_recv_buffers SubdomainNeighborhoodSendRecvBuffer instance that serves for receiving data - must be
+///                              the same that was previously populated by `pack_send_and_recv_local_subdomain_boundaries()`
+/// @param reduction reduction mode
 template < typename GridDataType >
-void recv_unpack_and_add_local_subdomain_boundaries(
+void unpack_and_reduce_local_subdomain_boundaries(
     const grid::shell::DistributedDomain& domain,
     const GridDataType&                   data,
     SubdomainNeighborhoodSendRecvBuffer< typename GridDataType::value_type, grid::grid_data_vec_dim< GridDataType >() >&
-                          boundary_recv_buffers,
-    CommuncationReduction reduction = CommuncationReduction::SUM )
+                           boundary_recv_buffers,
+    CommunicationReduction reduction = CommunicationReduction::SUM )
 {
     // Since it is not clear whether a static last dimension of 1 impacts performance, we want to support both
     // scalar and vector-valued grid data views. To simplify matters, we always use the vector-valued versions for the
@@ -722,36 +763,41 @@ void recv_unpack_and_add_local_subdomain_boundaries(
 
 /// @brief Executes packing, sending, receiving, and unpacking operations for the shell.
 ///
-/// IMPORTANT NOTE: THIS MAY COME WITH A PERFORMANCE PENALTY.
-///                 This (re-)allocates send and receive buffers for each call, which could be inefficient.
-///                 Use only where performance does not matter (e.g. in tests).
+/// @note THIS MAY COME WITH A PERFORMANCE PENALTY.
+///       This function (re-)allocates send and receive buffers for each call, which could be inefficient.
+///       Use only where performance does not matter (e.g. in tests).
+///       Better: reuse the buffers for subsequent send-recv calls through overloads of this function.
+///
+/// Essentially just calls `pack_send_and_recv_local_subdomain_boundaries()` and `unpack_and_reduce_local_subdomain_boundaries()`.
 template < typename ScalarType >
 void send_recv(
     const grid::shell::DistributedDomain& domain,
     grid::Grid4DDataScalar< ScalarType >& grid,
-    const CommuncationReduction           reduction = CommuncationReduction::SUM )
+    const CommunicationReduction          reduction = CommunicationReduction::SUM )
 {
     SubdomainNeighborhoodSendRecvBuffer< ScalarType > send_buffers( domain );
     SubdomainNeighborhoodSendRecvBuffer< ScalarType > recv_buffers( domain );
 
-    shell::pack_and_send_local_subdomain_boundaries( domain, grid, send_buffers, recv_buffers );
-    shell::recv_unpack_and_add_local_subdomain_boundaries( domain, grid, recv_buffers, reduction );
+    shell::pack_send_and_recv_local_subdomain_boundaries( domain, grid, send_buffers, recv_buffers );
+    shell::unpack_and_reduce_local_subdomain_boundaries( domain, grid, recv_buffers, reduction );
 }
 
 /// @brief Executes packing, sending, receiving, and unpacking operations for the shell.
 ///
 /// Send and receive buffers must be passed. This is the preferred way to execute communication since the buffers
 /// can be reused.
+///
+/// Essentially just calls `pack_send_and_recv_local_subdomain_boundaries()` and `unpack_and_reduce_local_subdomain_boundaries()`.
 template < typename ScalarType >
 void send_recv(
     const grid::shell::DistributedDomain&              domain,
     grid::Grid4DDataScalar< ScalarType >&              grid,
     SubdomainNeighborhoodSendRecvBuffer< ScalarType >& send_buffers,
     SubdomainNeighborhoodSendRecvBuffer< ScalarType >& recv_buffers,
-    const CommuncationReduction                        reduction = CommuncationReduction::SUM )
+    const CommunicationReduction                       reduction = CommunicationReduction::SUM )
 {
-    shell::pack_and_send_local_subdomain_boundaries( domain, grid, send_buffers, recv_buffers );
-    shell::recv_unpack_and_add_local_subdomain_boundaries( domain, grid, recv_buffers, reduction );
+    shell::pack_send_and_recv_local_subdomain_boundaries( domain, grid, send_buffers, recv_buffers );
+    shell::unpack_and_reduce_local_subdomain_boundaries( domain, grid, recv_buffers, reduction );
 }
 
 } // namespace terra::communication::shell
