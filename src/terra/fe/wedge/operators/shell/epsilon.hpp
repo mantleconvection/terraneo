@@ -183,7 +183,7 @@ class EpsilonSimple
                                 //const auto grad_j = J_inv_transposed * grad_shape( j, quad_points[q] );
 
                                 A[wedge]( i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) +=
-                                    w * k_eval * ( ( sym_grad_i ).double_contract( sym_grad_j ) * abs_det );
+                                  0.5 * w * k_eval * ( ( sym_grad_i ).double_contract( sym_grad_j ) * abs_det );
                             }
                         }
                     }
@@ -205,101 +205,35 @@ class EpsilonSimple
                         if ( r_cell == 0 )
                         {
                             // Inner boundary (CMB).
-                            if ( dimi == dimj )
-                            {
-                                // diagonal block:
                                 for ( int i = 0; i < 6; i++ )
                                 {
                                     for ( int j = 0; j < 6; j++ )
                                     {
-                                        if ( i != j && ( i < 3 || j < 3 ) )
+                                        if ( (dimi == dimj && i != j && ( i < 3 || j < 3 ))
+					  or (dimi != dimj && ( i < 3 || j < 3 ) ))
                                         {
                                             boundary_mask(
                                                 i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
                                         }
                                     }
                                 }
-                            }
-                            else if ( dimj > dimi )
-                            {
-                                // CMB upper off-diagonal block:
-                                for ( int i = 0; i < 6; i++ )
-                                {
-                                    for ( int j = 0; j < 6; j++ )
-                                    {
-                                        if ( i < 3 || j < 3 )
-                                        {
-                                            boundary_mask(
-                                                i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
-                                        }
-                                    }
-                                }
-                            }
-                            else if ( dimj < dimi )
-                            {
-                                // CMB lower off-diagonal block:
-                                for ( int i = 0; i < 6; i++ )
-                                {
-                                    for ( int j = 0; j < 6; j++ )
-                                    {
-                                        if ( j < 3 || i < 3  )
-                                        {
-                                            boundary_mask(
-                                                i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
-                                        }
-                                    }
-                                }
-                            }
                         }
 
                         if ( r_cell + 1 == radii_.extent( 1 ) - 1 )
                         {
                             // Outer boundary (surface).
-                            if ( dimi == dimj )
-                            {
-                                // Diagonal block
                                 for ( int i = 0; i < 6; i++ )
                                 {
                                     for ( int j = 0; j < 6; j++ )
                                     {
-                                        if ( i != j && ( i >= 3 || j >= 3 ) )
+                                        if ( (dimi == dimj && i != j && ( i >= 3 || j >= 3 ))
+					  or (dimi != dimj && ( i >= 3 || j >= 3 ) ))
                                         {
                                             boundary_mask(
                                                 i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
                                         }
                                     }
                                 }
-                            }
-                            else if ( dimj > dimi )
-                            {
-                                // Surface upper off-diagonal block:
-                                for ( int i = 0; i < 6; i++ )
-                                {
-                                    for ( int j = 0; j < 6; j++ )
-                                    {
-                                        if ( i >= 3 || j >= 3 )
-                                        {
-                                            boundary_mask(
-                                                i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
-                                        }
-                                    }
-                                }
-                            }
-                            else if ( dimj < dimi )
-                            {
-                                // Surface lower off-diagonal block:
-                                for ( int i = 0; i < 6; i++ )
-                                {
-                                    for ( int j = 0; j < 6; j++ )
-                                    {
-                                        if ( i >= 3 ||j >= 3 )
-                                        {
-                                            boundary_mask(
-                                                i + num_nodes_per_wedge * dimi, j + num_nodes_per_wedge * dimj ) = 0.0;
-                                        }
-                                    }
-                                }
-                            }
                         }
 
                         A[wedge].hadamard_product( boundary_mask );

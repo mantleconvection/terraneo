@@ -62,11 +62,6 @@ struct SolutionInterpolator
             data_( local_subdomain_id, x, y, r, 2 ) =
                 4 * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sin( 2 * coords( 1 ) ) * Kokkos::sinh( coords( 2 ) );
 
-            /*const double value = ( 1.0 / 2.0 ) * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) ) *
-                                 Kokkos::sin( 2 * coords( 2 ) );
-            data_( local_subdomain_id, x, y, r, 0 ) = value;
-            data_( local_subdomain_id, x, y, r, 1 ) = value;
-            data_( local_subdomain_id, x, y, r, 2 ) = value;*/
         }
     }
 };
@@ -172,14 +167,6 @@ struct RHSInterpolator
                 x6 * ( -x4 + 4.0 * x5 * Kokkos::cos( x1 ) * Kokkos::sinh( coords( 0 ) ) );
         }
 
-        /*const double x0    = 2 * coords( 2 );
-        const double x1    = Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
-        const double value = 3.5 * x1 * ( Kokkos::sin( coords( 2 ) ) + 2 ) * Kokkos::sin( x0 ) -
-                             1.0 * x1 * Kokkos::cos( x0 ) * Kokkos::cos( coords( 2 ) );
-
-        data_( local_subdomain_id, x, y, r, 0 ) = value;
-        data_( local_subdomain_id, x, y, r, 1 ) = value;
-        data_( local_subdomain_id, x, y, r, 2 ) = value;*/
     }
 };
 
@@ -282,7 +269,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
         grid::shell::local_domain_md_range_policy_nodes( domain ),
         SetOnBoundary( Adiagg.grid_data(), b.grid_data(), domain.domain_info().subdomain_num_nodes_radially() ) );
 
-    linalg::solvers::IterativeSolverParameters solver_params{ 1000, 1e-15, 1e-15 };
+    linalg::solvers::IterativeSolverParameters solver_params{ 100, 1e-15, 1e-15 };
 
     linalg::solvers::PCG< Epsilon > pcg( solver_params, table, { tmp, Adiagg, error, r } );
     pcg.set_tag( "pcg_solver_level_" + std::to_string( level ) );
@@ -318,9 +305,8 @@ int main( int argc, char** argv )
         const auto time_total = timer.seconds();
         table->add_row( { { "level", level }, { "time_total", time_total } } );
 
-        if ( level > 2 )
-        {
             const double order = prev_l2_error / l2_error;
+            std::cout << "error = " << l2_error << std::endl;
             std::cout << "order = " << order << std::endl;
             /*if ( order < 3.8 )
             {
@@ -328,7 +314,6 @@ int main( int argc, char** argv )
             }*/
 
             table->add_row( { { "level", level }, { "order", prev_l2_error / l2_error } } );
-        }
         prev_l2_error = l2_error;
     }
 
