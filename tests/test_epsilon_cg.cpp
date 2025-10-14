@@ -229,7 +229,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
         KInterpolator( subdomain_shell_coords, subdomain_radii, k.grid_data() ) );
 
     Kokkos::fence();
-    using Epsilon = fe::wedge::operators::shell::EpsilonSimple< ScalarType, 3 >;
+    using Epsilon = fe::wedge::operators::shell::Epsilon< ScalarType, 3 >;
 
     Epsilon A( domain, subdomain_shell_coords, subdomain_radii, k.grid_data(), true, false );
     Epsilon A_neumann( domain, subdomain_shell_coords, subdomain_radii, k.grid_data(), false, false );
