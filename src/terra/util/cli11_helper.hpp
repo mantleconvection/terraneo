@@ -22,6 +22,18 @@ CLI::Option* add_option_with_default( CLI::App& app, const std::string& name, au
     return app.add_option( name, field, std::move( desc ) )->default_val( field );
 }
 
+/// @brief Just a small wrapper to set the default of the flag to the value of the variable where it shall be stored.
+///
+/// Equivalent to
+/// @code
+/// app.add_flag( name, field, std::move( desc ) )->default_val( field );
+/// @endcode
+/// but with this you do not have to pass 'field' twice :)
+inline CLI::Option* add_flag_with_default( CLI::App& app, const std::string& name, bool& field, std::string desc = "" )
+{
+    return app.add_flag( name, field, std::move( desc ) )->default_val( field );
+}
+
 /// @brief Prints an overview of the available flags, the passed arguments, defaults, etc.
 inline void print_cli_summary( const CLI::App& app, std::ostream& os = std::cout )
 {
