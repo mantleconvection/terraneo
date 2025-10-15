@@ -106,9 +106,9 @@ class Epsilon
         {
             util::Timer timer_comm( "vector_laplace_comm" );
 
-            communication::shell::pack_and_send_local_subdomain_boundaries(
+            communication::shell::pack_send_and_recv_local_subdomain_boundaries(
                 domain_, dst_, send_buffers_, recv_buffers_ );
-            communication::shell::recv_unpack_and_add_local_subdomain_boundaries( domain_, dst_, recv_buffers_ );
+            communication::shell::unpack_and_reduce_local_subdomain_boundaries( domain_, dst_, recv_buffers_ );
         }
     }
 
@@ -135,50 +135,48 @@ class Epsilon
         dense::Vec< ScalarT, 6 > k_local_hex[num_wedges_per_hex_cell];
         extract_local_wedge_scalar_coefficients( k_local_hex, local_subdomain_id, x_cell, y_cell, r_cell, k_ );
 
-        ScalarType src_local_hex[8][VecDim] = { { 0 } };
-        ScalarType dst_local_hex[8][VecDim] = { { 0 } };
-
-        constexpr int hex_offset_x[8] = { 0, 1, 0, 1, 0, 1, 0, 1 };
-        constexpr int hex_offset_y[8] = { 0, 0, 1, 1, 0, 0, 1, 1 };
-        constexpr int hex_offset_r[8] = { 0, 0, 0, 0, 1, 1, 1, 1 };
-        for ( int i = 0; i < 8; i++ )
-        {
-            for ( int d = 0; d < VecDim; d++ )
-            {
-                src_local_hex[i][d] = src_(
-                    local_subdomain_id,
-                    x_cell + hex_offset_x[i],
-                    y_cell + hex_offset_y[i],
-                    r_cell + hex_offset_r[i],
-                    d );
-            }
-        }
-
         // FE dimensions: velocity coupling components of epsilon operator
 
-        // spatial dimensions: quadrature points and wedge
-        for ( int q = 0; q < num_quad_points; q++ )
+        for ( int dimi = 0; dimi < 3; ++dimi )
         {
-            const auto quad_weight = quad_weights[q];
-
-            for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
+            for ( int dimj = 0; dimj < 3; ++dimj )
             {
-                dense::Mat< ScalarT, VecDim, VecDim >       J = jac( wedge_phy_surf[wedge], r_1, r_2, quad_points[q] );
-                const auto                                  det              = J.det();
-                const auto                                  abs_det          = Kokkos::abs( det );
-                const dense::Mat< ScalarT, VecDim, VecDim > J_inv_transposed = J.inv_transposed( det );
-                ScalarType                                  k_eval           = 0.0;
-                for ( int k = 0; k < num_nodes_per_wedge; k++ )
+                if ( diagonal_ and dimi != dimj )
+                    continue;
+
+                ScalarType src_local_hex[8] = { { 0 } };
+                ScalarType dst_local_hex[8] = { { 0 } };
+
+                constexpr int hex_offset_x[8] = { 0, 1, 0, 1, 0, 1, 0, 1 };
+                constexpr int hex_offset_y[8] = { 0, 0, 1, 1, 0, 0, 1, 1 };
+                constexpr int hex_offset_r[8] = { 0, 0, 0, 0, 1, 1, 1, 1 };
+                for ( int i = 0; i < 8; i++ )
                 {
-                    k_eval += shape( k, quad_points[q] ) * k_local_hex[wedge]( k );
+                    src_local_hex[i] = src_(
+                        local_subdomain_id,
+                        x_cell + hex_offset_x[i],
+                        y_cell + hex_offset_y[i],
+                        r_cell + hex_offset_r[i],
+                        dimi );
                 }
 
-                for ( int dimi = 0; dimi < 3; ++dimi )
+                // spatial dimensions: quadrature points and wedge
+                for ( int q = 0; q < num_quad_points; q++ )
                 {
-                    for ( int dimj = 0; dimj < 3; ++dimj )
+                    const auto quad_weight = quad_weights[q];
+
+                    for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
                     {
-                        if ( diagonal_ and dimi != dimj )
-                            continue;
+                        dense::Mat< ScalarT, VecDim, VecDim > J =
+                            jac( wedge_phy_surf[wedge], r_1, r_2, quad_points[q] );
+                        const auto                                  det              = J.det();
+                        const auto                                  abs_det          = Kokkos::abs( det );
+                        const dense::Mat< ScalarT, VecDim, VecDim > J_inv_transposed = J.inv_transposed( det );
+                        ScalarType                                  k_eval           = 0.0;
+                        for ( int k = 0; k < num_nodes_per_wedge; k++ )
+                        {
+                            k_eval += shape( k, quad_points[q] ) * k_local_hex[wedge]( k );
+                        }
 
                         dense::Mat< ScalarT, VecDim, VecDim > sym_grad_i[num_nodes_per_wedge];
                         dense::Mat< ScalarT, VecDim, VecDim > sym_grad_j[num_nodes_per_wedge];
@@ -212,7 +210,7 @@ class Epsilon
                         else if ( treat_boundary_ && r_cell == 0 )
                         {
                             // Bottom boundary dirichlet
-                            dirichlet_bot(
+                            dirichlet_cmb(
                                 src_local_hex,
                                 dst_local_hex,
                                 k_eval,
@@ -227,7 +225,7 @@ class Epsilon
                         else if ( treat_boundary_ && r_cell + 1 == radii_.extent( 1 ) - 1 )
                         {
                             // Top boundary dirichlet
-                            dirichlet_top(
+                            dirichlet_surface(
                                 src_local_hex,
                                 dst_local_hex,
                                 k_eval,
@@ -255,13 +253,29 @@ class Epsilon
                         }
                     }
                 }
+
+                for ( int i = 0; i < 8; i++ )
+                {
+                    constexpr int hex_offset_x[8] = { 0, 1, 0, 1, 0, 1, 0, 1 };
+                    constexpr int hex_offset_y[8] = { 0, 0, 1, 1, 0, 0, 1, 1 };
+                    constexpr int hex_offset_r[8] = { 0, 0, 0, 0, 1, 1, 1, 1 };
+
+                    Kokkos::atomic_add(
+                        &dst_(
+                            local_subdomain_id,
+                            x_cell + hex_offset_x[i],
+                            y_cell + hex_offset_y[i],
+                            r_cell + hex_offset_r[i],
+                            dimj ),
+                        dst_local_hex[i] );
+                }
             }
         }
     }
 
     KOKKOS_INLINE_FUNCTION void neumann(
-        ScalarType                      src_local_hex[8][VecDim],
-        ScalarType                      dst_local_hex[8][VecDim],
+        ScalarType                      src_local_hex[8],
+        ScalarType                      dst_local_hex[8],
         const ScalarType                k_eval,
         const int                       wedge,
         const ScalarType                quad_weight,
@@ -281,22 +295,67 @@ class Epsilon
         grad_u.fill( 0.0 );
         for ( int j = 0; j < num_nodes_per_wedge; j++ )
         {
-            grad_u =
-                grad_u + sym_grad_j[j] *
-                             src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]][dimj];
+            grad_u = grad_u + sym_grad_i[j] *
+                                  src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]];
         }
 
         // 4. Add the test function contributions.
         for ( int i = 0; i < num_nodes_per_wedge; i++ )
         {
-            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][dimi] +=
-                0.5 * quad_weight * k_eval * ( sym_grad_i[i] ).double_contract( grad_u ) * abs_det;
+            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
+                2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u ) * abs_det;
         }
     }
 
-    KOKKOS_INLINE_FUNCTION void dirichlet_top(
-        ScalarType                      src_local_hex[8][VecDim],
-        ScalarType                      dst_local_hex[8][VecDim],
+    KOKKOS_INLINE_FUNCTION void dirichlet_cmb(
+        ScalarType                      src_local_hex[8],
+        ScalarType                      dst_local_hex[8],
+        const ScalarType                k_eval,
+        const int                       wedge,
+        const ScalarType                quad_weight,
+        const ScalarType                abs_det,
+        dense::Mat< ScalarType, 3, 3 >* sym_grad_i,
+        dense::Mat< ScalarType, 3, 3 >* sym_grad_j,
+        const int                       dimi,
+        const int                       dimj ) const
+    {
+        constexpr int offset_x[2][6] = { { 0, 1, 0, 0, 1, 0 }, { 1, 0, 1, 1, 0, 1 } };
+        constexpr int offset_y[2][6] = { { 0, 0, 1, 0, 0, 1 }, { 1, 1, 0, 1, 1, 0 } };
+        constexpr int offset_r[2][6] = { { 0, 0, 0, 1, 1, 1 }, { 0, 0, 0, 1, 1, 1 } };
+
+        // 3. Compute ∇u at this quadrature point.
+        dense::Mat< ScalarType, 3, 3 > grad_u;
+        grad_u.fill( 0.0 );
+        for ( int j = 3; j < num_nodes_per_wedge; j++ )
+        {
+            grad_u = grad_u + sym_grad_i[j] *
+                                  src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]];
+        }
+
+        // 4. Add the test function contributions.
+        for ( int i = 3; i < num_nodes_per_wedge; i++ )
+        {
+            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
+                2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u ) * abs_det;
+        }
+
+        // Diagonal for top part
+        if ( dimi == dimj )
+        {
+            for ( int i = 0; i < 3; i++ )
+            {
+                const auto grad_u_diag =
+                    sym_grad_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
+
+                dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
+                    2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u_diag ) * abs_det;
+            }
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION void dirichlet_surface(
+        ScalarType                      src_local_hex[8],
+        ScalarType                      dst_local_hex[8],
         const ScalarType                k_eval,
         const int                       wedge,
         const ScalarType                quad_weight,
@@ -316,81 +375,34 @@ class Epsilon
         grad_u.fill( 0.0 );
         for ( int j = 0; j < 3; j++ )
         {
-            grad_u =
-                grad_u + sym_grad_j[j] *
-                             src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]][dimj];
+            grad_u = grad_u + sym_grad_i[j] *
+                                  src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]];
         }
 
         // 4. Add the test function contributions.
         for ( int i = 0; i < 3; i++ )
         {
-            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][dimi] +=
-                0.5 * quad_weight * k_eval * ( sym_grad_i[i] ).double_contract( grad_u ) * abs_det;
+            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
+                2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u ) * abs_det;
         }
 
         // Diagonal for top part
-        for ( int i = 3; i < num_nodes_per_wedge; i++ )
+        if ( dimi == dimj )
         {
-            const auto grad_u_diag =
+            for ( int i = 3; i < num_nodes_per_wedge; i++ )
+            {
+                const auto grad_u_diag =
+                    sym_grad_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
 
-                sym_grad_j[i] *
-                src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][dimj];
-
-            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][dimi] +=
-                0.5 * quad_weight * k_eval * ( sym_grad_i[i] ).double_contract( grad_u_diag ) * abs_det;
+                dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
+                    2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u_diag ) * abs_det;
+            }
         }
     }
-
-    KOKKOS_INLINE_FUNCTION void dirichlet_bot(
-        ScalarType                      src_local_hex[8][VecDim],
-        ScalarType                      dst_local_hex[8][VecDim],
-        const ScalarType                k_eval,
-        const int                       wedge,
-        const ScalarType                quad_weight,
-        const ScalarType                abs_det,
-        dense::Mat< ScalarType, 3, 3 >* sym_grad_i,
-        dense::Mat< ScalarType, 3, 3 >* sym_grad_j,
-        const int                       dimi,
-        const int                       dimj ) const
-    {
-        constexpr int offset_x[2][6] = { { 0, 1, 0, 0, 1, 0 }, { 1, 0, 1, 1, 0, 1 } };
-        constexpr int offset_y[2][6] = { { 0, 0, 1, 0, 0, 1 }, { 1, 1, 0, 1, 1, 0 } };
-        constexpr int offset_r[2][6] = { { 0, 0, 0, 1, 1, 1 }, { 0, 0, 0, 1, 1, 1 } };
-
-        // 3. Compute ∇u at this quadrature point.
-        dense::Mat< ScalarType, 3, 3 > grad_u;
-
-        grad_u.fill( 0.0 );
-        for ( int j = 3; j < num_nodes_per_wedge; j++ )
-        {
-            grad_u =
-                grad_u + sym_grad_j[j] *
-                             src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]][dimj];
-        }
-
-        // 4. Add the test function contributions.
-        for ( int i = 3; i < num_nodes_per_wedge; i++ )
-        {
-            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][dimi] +=
-                0.5 * quad_weight * k_eval * ( sym_grad_i[i] ).double_contract( grad_u ) * abs_det;
-        }
-
-        // Diagonal for top part
-        for ( int i = 0; i < 3; i++ )
-        {
-            const auto grad_u_diag =
-
-                sym_grad_j[i] *
-                src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][dimj];
-
-            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][dimi] +=
-                0.5 * quad_weight * k_eval * ( sym_grad_i[i] ).double_contract( grad_u_diag ) * abs_det;
-        }
-    }
-
+    
     KOKKOS_INLINE_FUNCTION void diagonal(
-        ScalarType                      src_local_hex[8][VecDim],
-        ScalarType                      dst_local_hex[8][VecDim],
+        ScalarType                      src_local_hex[8],
+        ScalarType                      dst_local_hex[8],
         const ScalarType                k_eval,
         const int                       wedge,
         const ScalarType                quad_weight,
@@ -408,11 +420,10 @@ class Epsilon
         for ( int i = 0; i < num_nodes_per_wedge; i++ )
         {
             const auto grad_u_diag =
-                sym_grad_j[i] *
-                src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][dimj];
+                sym_grad_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
 
-            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]][dimi] +=
-                0.5 * quad_weight * k_eval * ( sym_grad_i[i] ).double_contract( grad_u_diag ) * abs_det;
+            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
+                2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u_diag ) * abs_det;
         }
     }
 };
