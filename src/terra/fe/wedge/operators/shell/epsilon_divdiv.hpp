@@ -167,19 +167,21 @@ class EpsilonDivDiv
 
                     for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
                     {
-                        dense::Mat< ScalarT, VecDim, VecDim > J =
+                        dense::Mat< ScalarType, VecDim, VecDim > J =
                             jac( wedge_phy_surf[wedge], r_1, r_2, quad_points[q] );
-                        const auto                                  det              = J.det();
-                        const auto                                  abs_det          = Kokkos::abs( det );
-                        const dense::Mat< ScalarT, VecDim, VecDim > J_inv_transposed = J.inv_transposed( det );
-                        ScalarType                                  k_eval           = 0.0;
+                        const auto                                     det              = J.det();
+                        const auto                                     abs_det          = Kokkos::abs( det );
+                        const dense::Mat< ScalarType, VecDim, VecDim > J_inv_transposed = J.inv_transposed( det );
+                        ScalarType                                     k_eval           = 0.0;
                         for ( int k = 0; k < num_nodes_per_wedge; k++ )
                         {
                             k_eval += shape( k, quad_points[q] ) * k_local_hex[wedge]( k );
                         }
 
-                        dense::Mat< ScalarT, VecDim, VecDim > sym_grad_i[num_nodes_per_wedge];
-                        dense::Mat< ScalarT, VecDim, VecDim > sym_grad_j[num_nodes_per_wedge];
+                        dense::Mat< ScalarType, VecDim, VecDim > sym_grad_i[num_nodes_per_wedge];
+                        dense::Mat< ScalarType, VecDim, VecDim > sym_grad_j[num_nodes_per_wedge];
+                        ScalarType                               div_i[num_nodes_per_wedge];
+                        ScalarType                               div_j[num_nodes_per_wedge];
                         for ( int k = 0; k < num_nodes_per_wedge; k++ )
                         {
                             dense::Mat< ScalarT, VecDim, VecDim > grad_i =
@@ -191,6 +193,9 @@ class EpsilonDivDiv
                                 J_inv_transposed * dense::Mat< ScalarT, VecDim, VecDim >::from_single_col_vec(
                                                        grad_shape( k, quad_points[q] ), dimj );
                             sym_grad_j[k] = ( grad_j + grad_j.transposed() ) * 0.5;
+
+                            div_i[k] = grad_i( dimi, dimi );
+                            div_j[k] = grad_j( dimj, dimj );
                         }
 
                         if ( diagonal_ )
@@ -204,6 +209,8 @@ class EpsilonDivDiv
                                 abs_det,
                                 sym_grad_i,
                                 sym_grad_j,
+                                div_i,
+                                div_j,
                                 dimi,
                                 dimj );
                         }
@@ -219,6 +226,8 @@ class EpsilonDivDiv
                                 abs_det,
                                 sym_grad_i,
                                 sym_grad_j,
+                                div_i,
+                                div_j,
                                 dimi,
                                 dimj );
                         }
@@ -234,6 +243,8 @@ class EpsilonDivDiv
                                 abs_det,
                                 sym_grad_i,
                                 sym_grad_j,
+                                div_i,
+                                div_j,
                                 dimi,
                                 dimj );
                         }
@@ -248,6 +259,8 @@ class EpsilonDivDiv
                                 abs_det,
                                 sym_grad_i,
                                 sym_grad_j,
+                                div_i,
+                                div_j,
                                 dimi,
                                 dimj );
                         }
@@ -282,6 +295,8 @@ class EpsilonDivDiv
         const ScalarType                abs_det,
         dense::Mat< ScalarType, 3, 3 >* sym_grad_i,
         dense::Mat< ScalarType, 3, 3 >* sym_grad_j,
+        ScalarType                      div_i[num_nodes_per_wedge],
+        ScalarType                      div_j[num_nodes_per_wedge],
         const int                       dimi,
         const int                       dimj ) const
     {
@@ -291,19 +306,21 @@ class EpsilonDivDiv
 
         // 3. Compute ∇u at this quadrature point.
         dense::Mat< ScalarType, 3, 3 > grad_u;
-
+        ScalarType                     divu = 0.0;
         grad_u.fill( 0.0 );
-        for ( int j = 0; j < num_nodes_per_wedge; j++ )
+        for ( int i = 0; i < num_nodes_per_wedge; i++ )
         {
-            grad_u = grad_u + sym_grad_i[j] *
-                                  src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]];
+            grad_u = grad_u + sym_grad_i[i] *
+                                  src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
+            divu += div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
         }
 
         // 4. Add the test function contributions.
-        for ( int i = 0; i < num_nodes_per_wedge; i++ )
+        for ( int j = 0; j < num_nodes_per_wedge; j++ )
         {
-            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
-                2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u ) * abs_det;
+            dst_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]] +=
+                quad_weight * k_eval * abs_det *
+                ( 2 * ( sym_grad_j[j] ).double_contract( grad_u ) - 2.0 / 3.0 * div_j[j] * divu );
         }
     }
 
@@ -316,6 +333,8 @@ class EpsilonDivDiv
         const ScalarType                abs_det,
         dense::Mat< ScalarType, 3, 3 >* sym_grad_i,
         dense::Mat< ScalarType, 3, 3 >* sym_grad_j,
+        ScalarType                      div_i[num_nodes_per_wedge],
+        ScalarType                      div_j[num_nodes_per_wedge],
         const int                       dimi,
         const int                       dimj ) const
     {
@@ -325,18 +344,21 @@ class EpsilonDivDiv
 
         // 3. Compute ∇u at this quadrature point.
         dense::Mat< ScalarType, 3, 3 > grad_u;
+        ScalarType                     divu = 0.0;
         grad_u.fill( 0.0 );
-        for ( int j = 3; j < num_nodes_per_wedge; j++ )
+        for ( int i = 3; i < num_nodes_per_wedge; i++ )
         {
-            grad_u = grad_u + sym_grad_i[j] *
-                                  src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]];
+            grad_u = grad_u + sym_grad_i[i] *
+                                  src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
+            divu += div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
         }
 
         // 4. Add the test function contributions.
-        for ( int i = 3; i < num_nodes_per_wedge; i++ )
+        for ( int j = 3; j < num_nodes_per_wedge; j++ )
         {
-            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
-                2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u ) * abs_det;
+            dst_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]] +=
+                quad_weight * k_eval * abs_det *
+                ( 2 * ( sym_grad_j[j] ).double_contract( grad_u ) - 2.0 / 3.0 * div_j[j] * divu );
         }
 
         // Diagonal for top part
@@ -346,9 +368,12 @@ class EpsilonDivDiv
             {
                 const auto grad_u_diag =
                     sym_grad_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
+                const auto div_u_diag =
+                    div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
 
                 dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
-                    2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u_diag ) * abs_det;
+                    quad_weight * k_eval * abs_det *
+                    ( 2 * ( sym_grad_j[i] ).double_contract( grad_u_diag ) - 2.0 / 3.0 * div_j[i] * div_u_diag );
             }
         }
     }
@@ -362,6 +387,8 @@ class EpsilonDivDiv
         const ScalarType                abs_det,
         dense::Mat< ScalarType, 3, 3 >* sym_grad_i,
         dense::Mat< ScalarType, 3, 3 >* sym_grad_j,
+        ScalarType                      div_i[num_nodes_per_wedge],
+        ScalarType                      div_j[num_nodes_per_wedge],
         const int                       dimi,
         const int                       dimj ) const
     {
@@ -371,19 +398,21 @@ class EpsilonDivDiv
 
         // 3. Compute ∇u at this quadrature point.
         dense::Mat< ScalarType, 3, 3 > grad_u;
-
+        ScalarType                     divu = 0.0;
         grad_u.fill( 0.0 );
-        for ( int j = 0; j < 3; j++ )
+        for ( int i = 0; i < 3; i++ )
         {
-            grad_u = grad_u + sym_grad_i[j] *
-                                  src_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]];
+            grad_u = grad_u + sym_grad_i[i] *
+                                  src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
+            divu += div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
         }
 
         // 4. Add the test function contributions.
-        for ( int i = 0; i < 3; i++ )
+        for ( int j = 0; j < 3; j++ )
         {
-            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
-                2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u ) * abs_det;
+            dst_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]] +=
+                quad_weight * k_eval * abs_det *
+                ( 2 * ( sym_grad_j[j] ).double_contract( grad_u ) - 2.0 / 3.0 * div_j[j] * divu );
         }
 
         // Diagonal for top part
@@ -393,13 +422,16 @@ class EpsilonDivDiv
             {
                 const auto grad_u_diag =
                     sym_grad_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
+                const auto div_u_diag =
+                    div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
 
                 dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
-                    2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u_diag ) * abs_det;
+                    quad_weight * k_eval * abs_det *
+                    ( 2 * ( sym_grad_j[i] ).double_contract( grad_u_diag ) - 2.0 / 3.0 * div_j[i] * div_u_diag );
             }
         }
     }
-    
+
     KOKKOS_INLINE_FUNCTION void diagonal(
         ScalarType                      src_local_hex[8],
         ScalarType                      dst_local_hex[8],
@@ -409,6 +441,8 @@ class EpsilonDivDiv
         const ScalarType                abs_det,
         dense::Mat< ScalarType, 3, 3 >* sym_grad_i,
         dense::Mat< ScalarType, 3, 3 >* sym_grad_j,
+        ScalarType                      div_i[num_nodes_per_wedge],
+        ScalarType                      div_j[num_nodes_per_wedge],
         const int                       dimi,
         const int                       dimj ) const
     {
@@ -421,9 +455,12 @@ class EpsilonDivDiv
         {
             const auto grad_u_diag =
                 sym_grad_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
+            const auto div_u_diag =
+                div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
 
             dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
-                2 * quad_weight * k_eval * ( sym_grad_j[i] ).double_contract( grad_u_diag ) * abs_det;
+                quad_weight * k_eval * abs_det *
+                ( 2 * ( sym_grad_j[i] ).double_contract( grad_u_diag ) - 2.0 / 3.0 * div_j[i] * div_u_diag );
         }
     }
 };
