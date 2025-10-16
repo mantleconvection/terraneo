@@ -16,5 +16,6 @@ target_sources(terra
         div_k_grad.hpp
         epsilon.hpp
         epsilon_divdiv.hpp
+        epsilon_divdiv_stokes.hpp
         zero.hpp)
 

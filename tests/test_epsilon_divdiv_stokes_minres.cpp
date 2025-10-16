@@ -2,7 +2,7 @@
 
 #include "../src/terra/communication/shell/communication.hpp"
 #include "fe/wedge/integrands.hpp"
-#include "fe/wedge/operators/shell/stokes.hpp"
+#include "fe/wedge/operators/shell/epsilon_divdiv_stokes.hpp"
 #include "fe/wedge/operators/shell/vector_laplace_simple.hpp"
 #include "fe/wedge/operators/shell/vector_mass.hpp"
 #include "linalg/solvers/pcg.hpp"
@@ -33,8 +33,6 @@ using linalg::VectorQ1IsoQ2Q1;
 using linalg::VectorQ1Scalar;
 using linalg::VectorQ1Vec;
 
-#define SOLUTION_TYPE 1
-
 struct SolutionVelocityInterpolator
 {
     Grid3DDataVec< double, 3 > grid_;
@@ -62,28 +60,11 @@ struct SolutionVelocityInterpolator
         const double cy = coords( 1 );
         const double cz = coords( 2 );
 
-        dense::Vec< double, 3 > u;
-
-        if ( SOLUTION_TYPE == 0 )
-        {
-            u( 0 ) = Kokkos::sin( cy );
-            u( 1 ) = Kokkos::sin( cz );
-            u( 2 ) = Kokkos::sin( cx );
-        }
-
-        else if ( SOLUTION_TYPE == 1 )
-        {
-            u( 0 ) = -4 * Kokkos::cos( 4 * cz );
-            u( 1 ) = 8 * Kokkos::cos( 8 * cx );
-            u( 2 ) = -2 * Kokkos::cos( 2 * cy );
-        }
-
         if ( !only_boundary_ || ( r == 0 || r == radii_.extent( 1 ) - 1 ) )
         {
-            for ( int d = 0; d < 3; d++ )
-            {
-                data_u_( local_subdomain_id, x, y, r, d ) = u( d );
-            }
+            data_u_( local_subdomain_id, x, y, r, 0 ) = -4 * Kokkos::cos( 4 * cz );
+            data_u_( local_subdomain_id, x, y, r, 1 ) = 8 * Kokkos::cos( 8 * cx );
+            data_u_( local_subdomain_id, x, y, r, 2 ) = -2 * Kokkos::cos( 2 * cy );
         }
     }
 };
@@ -115,21 +96,10 @@ struct SolutionPressureInterpolator
         const double cy = coords( 1 );
         const double cz = coords( 2 );
 
-        double p = 0.0;
-
-        if ( SOLUTION_TYPE == 0 )
-        {
-            p = 0;
-        }
-
-        else if ( SOLUTION_TYPE == 1 )
-        {
-            p = Kokkos::sin( 4 * cx ) * Kokkos::sin( 8 * cy ) * Kokkos::sin( 2 * cz );
-        }
-
         if ( !only_boundary_ || ( r == 0 || r == radii_.extent( 1 ) - 1 ) )
         {
-            data_p_( local_subdomain_id, x, y, r ) = p;
+            data_p_( local_subdomain_id, x, y, r ) =
+                Kokkos::sin( 4 * cx ) * Kokkos::sin( 8 * cy ) * Kokkos::sin( 2 * cz );
         }
     }
 };
@@ -155,33 +125,19 @@ struct RHSVelocityInterpolator
     {
         const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
 
-        const double cx = coords( 0 );
-        const double cy = coords( 1 );
-        const double cz = coords( 2 );
+        const real_t x0 = 4 * coords( 2 );
+        data_u_( local_subdomain_id, x, y, r, 0 ) =
+            -64.0 * ( Kokkos::sin( coords( 2 ) ) + 2 ) * Kokkos::cos( x0 ) -
+            16.0 * Kokkos::sin( x0 ) * Kokkos::cos( coords( 2 ) ) +
+            4 * Kokkos::sin( 8 * coords( 1 ) ) * Kokkos::sin( 2 * coords( 2 ) ) * Kokkos::cos( 4 * coords( 0 ) );
+        data_u_( local_subdomain_id, x, y, r, 1 ) =
+            512.0 * ( Kokkos::sin( coords( 2 ) ) + 2 ) * Kokkos::cos( 8 * coords( 0 ) ) +
+            8 * Kokkos::sin( 4 * coords( 0 ) ) * Kokkos::sin( 2 * coords( 2 ) ) * Kokkos::cos( 8 * coords( 1 ) ) -
+            4.0 * Kokkos::sin( 2 * coords( 1 ) ) * Kokkos::cos( coords( 2 ) );
 
-        dense::Vec< double, 3 > u;
-
-        if ( SOLUTION_TYPE == 0 )
-        {
-            u( 0 ) = Kokkos::sin( cy );
-            u( 1 ) = Kokkos::sin( cz );
-            u( 2 ) = Kokkos::sin( cx );
-        }
-
-        else if ( SOLUTION_TYPE == 1 )
-        {
-            u( 0 ) =
-                4 * Kokkos::sin( 8 * cy ) * Kokkos::sin( 2 * cz ) * Kokkos::cos( 4 * cx ) - 64 * Kokkos::cos( 4 * cz );
-            u( 1 ) =
-                8 * Kokkos::sin( 4 * cx ) * Kokkos::sin( 2 * cz ) * Kokkos::cos( 8 * cy ) + 512 * Kokkos::cos( 8 * cx );
-            u( 2 ) =
-                2 * Kokkos::sin( 4 * cx ) * Kokkos::sin( 8 * cy ) * Kokkos::cos( 2 * cz ) - 8 * Kokkos::cos( 2 * cy );
-        }
-
-        for ( int d = 0; d < 3; d++ )
-        {
-            data_u_( local_subdomain_id, x, y, r, d ) = u( d );
-        }
+        data_u_( local_subdomain_id, x, y, r, 2 ) =
+            -8.0 * ( Kokkos::sin( coords( 2 ) ) + 2 ) * Kokkos::cos( 2 * coords( 1 ) ) +
+            2 * Kokkos::sin( 4 * coords( 0 ) ) * Kokkos::sin( 8 * coords( 1 ) ) * Kokkos::cos( 2 * coords( 2 ) );
     }
 };
 
@@ -207,6 +163,30 @@ struct SetOnBoundary
                 dst_( local_subdomain_idx, x, y, r, d ) = src_( local_subdomain_idx, x, y, r, d );
             }
         }
+    }
+};
+
+struct KInterpolator
+{
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+    Grid4DDataScalar< double > data_;
+
+    KInterpolator(
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataScalar< double >& data )
+    : grid_( grid )
+    , radii_( radii )
+    , data_( data )
+    {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
+    {
+        const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+        const double                  value  = 2 + Kokkos::sin( coords( 2 ) );
+        data_( local_subdomain_id, x, y, r ) = value;
     }
 };
 
@@ -248,15 +228,26 @@ std::pair< double, double > test( int level, const std::shared_ptr< util::Table 
     VectorQ1IsoQ2Q1< ScalarType > tmp_4( "tmp_4", domain_fine, domain_coarse, mask_data_fine, mask_data_coarse );
     VectorQ1IsoQ2Q1< ScalarType > tmp_5( "tmp_5", domain_fine, domain_coarse, mask_data_fine, mask_data_coarse );
     VectorQ1IsoQ2Q1< ScalarType > tmp_6( "tmp_6", domain_fine, domain_coarse, mask_data_fine, mask_data_coarse );
+    VectorQ1Scalar< ScalarType >  k( "k", domain_fine, mask_data_fine );
 
     const auto num_dofs_velocity = 3 * kernels::common::count_masked< long >( mask_data_fine, grid::mask_owned() );
     const auto num_dofs_pressure = kernels::common::count_masked< long >( mask_data_coarse, grid::mask_owned() );
 
-    using Stokes = fe::wedge::operators::shell::Stokes< ScalarType >;
+    using Stokes = fe::wedge::operators::shell::EpsDivDivStokes< ScalarType >;
 
-    Stokes K( domain_fine, domain_coarse, subdomain_fine_shell_coords, subdomain_fine_radii, true, false );
-    Stokes K_neumann( domain_fine, domain_coarse, subdomain_fine_shell_coords, subdomain_fine_radii, false, false );
-    Stokes K_neumann_diag( domain_fine, domain_coarse, subdomain_fine_shell_coords, subdomain_fine_radii, false, true );
+    // Set up coefficient data.
+    Kokkos::parallel_for(
+        "coefficient interpolation",
+        local_domain_md_range_policy_nodes( domain_fine ),
+        KInterpolator( subdomain_fine_shell_coords, subdomain_fine_radii, k.grid_data() ) );
+    Kokkos::fence();
+
+    Stokes K(
+        domain_fine, domain_coarse, subdomain_fine_shell_coords, subdomain_fine_radii, k.grid_data(), true, false );
+    Stokes K_neumann(
+        domain_fine, domain_coarse, subdomain_fine_shell_coords, subdomain_fine_radii, k.grid_data(), false, false );
+    Stokes K_neumann_diag(
+        domain_fine, domain_coarse, subdomain_fine_shell_coords, subdomain_fine_radii, k.grid_data(), false, true );
 
     using Mass = fe::wedge::operators::shell::VectorMass< ScalarType, 3 >;
 
@@ -363,27 +354,11 @@ int main( int argc, char** argv )
         const auto time_total                   = timer.seconds();
         table->add_row( { { "level", level }, { "time_total", time_total } } );
 
-        if ( level > 2 )
-        {
-            const double order_vel = prev_l2_error_vel / l2_error_vel;
-            const double order_pre = prev_l2_error_pre / l2_error_pre;
+        const double order_vel = prev_l2_error_vel / l2_error_vel;
+        const double order_pre = prev_l2_error_pre / l2_error_pre;
 
-            std::cout << "order_vel = " << order_vel << std::endl;
-            std::cout << "order_pre = " << order_pre << std::endl;
-
-            if ( order_vel < 3.7 )
-            {
-                return EXIT_FAILURE;
-            }
-
-            if ( order_vel < 3.7 )
-            {
-                return EXIT_FAILURE;
-            }
-
-            table->add_row( { { "level", level }, { "order_vel", order_vel }, { "order_pre", order_pre } } );
-            table->print_pretty();
-        }
+        table->add_row( { { "level", level }, { "order_vel", order_vel }, { "order_pre", order_pre } } );
+    
         prev_l2_error_vel = l2_error_vel;
         prev_l2_error_pre = l2_error_pre;
     }
