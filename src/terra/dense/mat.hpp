@@ -45,6 +45,20 @@ struct Mat
     }
 
     KOKKOS_INLINE_FUNCTION
+    constexpr static Mat
+        from_single_col_vec( const Vec< T, Cols >& col, const int d )
+    {
+        static_assert( Rows == 3 && Cols == 3, "This constructor is only for 3x3 matrices" );
+        assert( d < 3);
+        Mat mat;
+        mat.fill(0);
+        mat.data[0][d] = col( 0 );
+        mat.data[1][d] = col( 1 );
+        mat.data[2][d] = col( 2 );
+        return mat;
+    }
+
+    KOKKOS_INLINE_FUNCTION
     constexpr static Mat diagonal_from_vec( const Vec< T, Rows >& diagonal )
     {
         Mat mat;
@@ -126,6 +140,34 @@ struct Mat
     }
 
     KOKKOS_INLINE_FUNCTION
+    Mat operator+( const Mat& mat )
+    {
+        Mat result;
+        for ( int i = 0; i < Rows; ++i )
+        {
+            for ( int j = 0; j < Cols; ++j )
+            {
+                result.data[i][j] = data[i][j] + mat.data[i][j];
+            }
+        }
+        return result;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    Mat& operator=( const Mat& mat )
+    {
+        for ( int i = 0; i < Rows; ++i )
+        {
+            for ( int j = 0; j < Cols; ++j )
+            {
+                data[i][j] = mat.data[i][j];
+            }
+        }
+        return *this;
+    }
+
+
+    KOKKOS_INLINE_FUNCTION
     constexpr Mat< T, Cols, Rows > transposed() const
     {
         Mat< T, Cols, Rows > result;
@@ -162,6 +204,20 @@ struct Mat
             }
         }
         return *this;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    T double_contract( const Mat& mat )
+    {
+        T v = 0.0;
+        for ( int i = 0; i < Rows; ++i )
+        {
+            for ( int j = 0; j < Cols; ++j )
+            {
+                v += data[i][j] * mat.data[i][j];
+            }
+        }
+        return v;
     }
 
     KOKKOS_INLINE_FUNCTION

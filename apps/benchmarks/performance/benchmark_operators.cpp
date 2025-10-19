@@ -11,7 +11,6 @@
 #include "terra/dense/vec.hpp"
 #include "terra/grid/shell/spherical_shell.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
-#include "terra/util/table_printer.hpp"
 #include "util/info.hpp"
 #include "util/table.hpp"
 

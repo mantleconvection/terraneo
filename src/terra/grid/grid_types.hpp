@@ -174,7 +174,7 @@ constexpr std::array all_local_face_ids = {
 };
 
 // String conversion functions
-constexpr std::string to_string( BoundaryVertex v )
+std::string to_string( BoundaryVertex v )
 {
     switch ( v )
     {
@@ -199,7 +199,7 @@ constexpr std::string to_string( BoundaryVertex v )
     }
 }
 
-constexpr std::string to_string( BoundaryEdge e )
+std::string to_string( BoundaryEdge e )
 {
     switch ( e )
     {
@@ -232,7 +232,7 @@ constexpr std::string to_string( BoundaryEdge e )
     }
 }
 
-constexpr std::string to_string( BoundaryFace f )
+std::string to_string( BoundaryFace f )
 {
     switch ( f )
     {
