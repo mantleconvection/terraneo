@@ -70,11 +70,12 @@ terraneox/
 
 ### Grid structure and subdomains (part I - logical structure)
 
-\note This section is just describing the logical organization of data. For details on actual data layout / allocation
+\note This section is just describing the logical organization of data. For details on memory layout / allocation
       refer to the Kokkos section. Details on the construction of the thick spherical shell and communication are given
-      in dedicated sections below.
+      in the dedicated sections below.
 
-All grid operations are performed on a set of hexahedral subdomains. Those are organized as 4- or 5 dimensional arrays.
+All grid operations are performed on a set of hexahedral subdomains (block-structured grid). 
+The corresponding grid data is organized via 4- or 5 dimensional arrays.
 
 ```
     data( local_subdomain_id, node_x, node_y, node_r )                     // for scalar data
@@ -93,9 +94,10 @@ same spatial organization of nodes required for hexahedral elements.
 The division of one hexahedron into two wedges is implicitly done in the compute kernels and is not represented by the
 grid data structure.
 
-(Since we are using Lagrangian basis functions nodes directly correspond to coefficients. For the linear cases, we can
-also use the same grid data structure for linear hexahedral finite elements. Such an extension is straightforward and
-just requires respective kernels. One could even mix both - although it is not clear if that is mathematically sound.)
+(Since we are using linear Lagrangian basis functions, nodes directly correspond to coefficients. For the linear cases, 
+we can also use the same grid data structure for linear hexahedral finite elements. Such an extension is straightforward 
+and just requires respective kernels. One could even mix both - although it is not clear if that is mathematically 
+sound.)
 
 As a convention, the hexahedral elements are split into two wedges diagonally from node (1, 0) to node (0, 1) as 
 follows:
@@ -119,13 +121,11 @@ Each node 'o' either stores a scalar or a vector.
         x
 ```
 
-Some helper functions to work on this grid structure are supplied in `kernel_helpers.hpp`. 
-
 -----------
 
 ### Finite element discretization
 
-The partial differential equations and their solutions are approximated using the finite element methods.
+The partial differential equations and their solutions are approximated using the finite element method.
 
 We are using linear wedge elements for all spaces, unless specified otherwise. This is very similar to the 
 implementation in Terra.
@@ -135,7 +135,7 @@ See helper functions and documentation in [integrands.hpp](@ref integrands.hpp) 
 [namespace terra::fe:wedge](@ref terra::fe::wedge) for details, and other, derived
 quantities like gradients, Jacobians, determinants, etc.
 
-Linear wedge (or prismatic) elements are formed by extruding a linear triangular element in the radial direction.
+Linear wedge (or prism) elements are formed by extruding a linear triangular element in the radial direction.
 The base triangle lies in the lateral plane (parameterized by \f$\xi\f$,\f$\eta\f$), while the extrusion occurs along the radial
 coordinate \f$\zeta\f$.
 
@@ -159,22 +159,26 @@ With
 
   \code
 
-  r_node_idx = r_cell_idx + 1 (outer):
+  Case I: 
+    
+    radial_node_idx == radial_cell_idx + 1 (outer triangle of wedge):
 
-  5
-  |\
-  | \
-  3--4
+    5
+    |\
+    | \
+    3--4
   \endcode
 
   \code
 
-  r_node_idx = r_cell_idx (inner):
+  Case II: 
+  
+    radial_node_idx == radial_cell_idx (inner triangle of wedge):
 
-  2
-  |\
-  | \
-  0--1
+    2
+    |\
+    | \
+    0--1
   \endcode
 
 #### Shape functions
@@ -260,10 +264,10 @@ The Earth mantle is approximated via a thick spherical shell \f$\Omega\f$ , i.e.
 A corresponding mesh is constructed by splitting the outer surface of \f$\Omega\f$ into 10 spherical diamonds that are 
 extruded towards (or equivalently away from) the origin.
 
-The figures below show the diamonds in a three-dimensional visualization (each diamond is refined 4 times in lateral and
-4 times in radial direction).
+The figures/videos below show the diamonds in a three-dimensional visualization (each diamond is refined 4 times in 
+lateral and 4 times in radial direction).
 
-Single diamond (diamond id = 0):
+Single diamond (`diamond_id == 0`):
 \htmlonly
 <video width="960" controls>
 <source src="diamond_animation.mp4" type="video/mp4">
@@ -271,7 +275,7 @@ Single diamond (diamond id = 0):
 \endhtmlonly
 \image html figures/diamond_animation.mp4
 
-Northern (diamonds 0 to 4) and southern diamonds (diamonds 5 to 9):
+Northern (`0 <= diamond_id <= 4`) and southern diamonds (`5 <= diamond_id <= 9`):
 \htmlonly
 <video width="960" controls>
 <source src="north_south_animation.mp4" type="video/mp4">
@@ -294,18 +298,22 @@ After (uniform) lateral refinement, each subdomain can be associated with a glob
 subdomain_id = (diamond_id, subdomain_x, subdomain_y, subdomain_r)
 ```
 
-as illustrated in the figure below:
+as illustrated in the figure below (for one refinement step in the lateral direction; note that the radial refinement
+is not visible in the figure and indicated by the colon in the tuple):
 
 \image html figures/thick-spherical-shell-subdomains.jpg
 
 The `subdomain_id` is implemented in the class \ref terra::grid::shell::SubdomainInfo.
 
-A domain can be set up using the \ref terra::grid::shell::DomainInfo class.
-This does not compute any node coordinates. It just stores the refinement information, i.e., how many subdomains
+The information about the global structure is captured in the \ref terra::grid::shell::DomainInfo class.
+That class does not compute any node coordinates. It just stores the refinement information, i.e., how many subdomains
 are present for each diamond in either direction.
-In lateral direction, refinement currently has to be uniform.
-In radial direction, the concrete radii of the layers can be specified.
+In the lateral direction, refinement currently has to be uniform.
+In the radial direction, the concrete radii of the layers can be specified.
 For more details refer to the documentation of \ref terra::grid::shell::DomainInfo.
+
+\note You typically do not construct the \ref terra::grid::shell::DomainInfo class yourself. Instead, you use the
+\ref terra::grid::shell::DistributedDomain class. 
 
 #### Local subdomains
 
@@ -313,7 +321,8 @@ Subdomains on the same MPI process are sorted by their global `subdomain_id` (it
 and continuously assigned to an integer `local_subdomain_id` that ranges from 0 to the number of process-local 
 subdomains minus 1.
 The `local_subdomain_id` is then the first index of the 4D (or 5D) data grids introduced above.
-For instance for a scalar data array `data` the expression
+
+For instance, for a scalar data array `data` the expression
 ```
     data( 3, 55, 20, 4 )
 ```
@@ -324,9 +333,10 @@ accesses the node with
     y_index            = 20
     r_index            =  4
 ```
-The mapping from the `subdomain_id` (`SubdomainInfo`) to the `local_subdomain_id` (`int`) is performed during set up
-and stored together with other information in the corresponding \ref terra::grid::shell::DistributedDomain instance.
-More details can be found the parallelization section.
+The mapping from the `subdomain_id` (type `SubdomainInfo`) to the `local_subdomain_id` (type `int`) is performed during
+set up and stored together with other information in the corresponding \ref terra::grid::shell::DistributedDomain 
+instance.
+More details are found in the parallelization section.
 
 #### Node coordinates
 
@@ -353,6 +363,8 @@ The radius is obviously just `coords_radii( local_subdomain_id, r_index )`.
 
 🏗️
 
+-----------
+
 ### Communication
 
 For operations that do not only work locally (such as matrix-vector products) information has to be communicated
@@ -360,7 +372,7 @@ across boundaries of neighboring subdomains.
 At subdomain boundaries, mesh nodes are duplicated: the same mesh node exists on multiple subdomains. 
 
 Generally, we **assume that the values at the mesh nodes are holding the correct values whenever entering linear 
-algebra building blocks**. That means we have to ensure that data is communicated after computations such as 
+algebra building blocks**. That means we have to ensure that data is communicated **after** computations such as 
 matrix-vector multiplications.
 
 A map of neighboring subdomains and metadata is generated via the class \ref terra::grid::shell::SubdomainNeighborhood.
@@ -375,10 +387,10 @@ communication and having very simple kernels (you can just loop over the entire 
 #### Dot products (and other reductions)
 
 The computation of dot products and other reductions must be performed carefully since we must not include duplicated 
-nodes twice. To ensure that, we store a flag field (mostly called mask data in the code) that assigns in a setup phase
+nodes twice. To ensure that, we store a flag field (mostly called `mask_data` in the code) that assigns in a setup phase
 (typically once at the start of the program) an `owned` flag to exactly one of the duplicated nodes. The dot
-product kernel (or any kind of reduction) then skips the nodes that are not marked as `owned`. See also the section
-on flag fields / masks.
+product kernel (or any kind of reduction) then skips the nodes that are not marked as `owned`. See also the 
+[section on masks / flag fields](#flag-fields-and-masks).
 
 #### Assigning random values
 
@@ -391,11 +403,13 @@ Due to the linearity of the matrix-free finite element matrix-vector multiplicat
 assuming the source vector is already updated) apply the kernel locally and then sum up the values on duplicated nodes
 and write that sum to all duplicated nodes.
 
-After the kernel has been executed, that additive communication is performed using two buffers (send and recv) for
+#### Communication details
+
+After a kernel has been executed, additive communication is performed using two buffers (send and recv) for
 each interface that a local subdomain has with another subdomain.
-The boundary data is written to the buffer and sent to the receiver side (via MPI).
-After receiving the data from the other subdomains, that data is added from the buffers to the local subdomain for each
-neighboring subdomain. 
+The boundary data is written to the send buffer and sent to the receiver side (via MPI).
+After receiving the data from the other subdomains, that data is added from the recv buffers to the respective local 
+subdomains. 
 Subdomain faces only have at most one interface with a different subdomain, whereas there can be more than one neighbor
 for edges and vertices of a subdomain.
 
@@ -403,10 +417,11 @@ In some cases, the data has to be rotated in some way to match the nodes at the 
 The convention here is that data is packed without rotation and is properly rotated during unpacking.
 
 By coincidence, the subdomain structure of the thick spherical shell only ever requires a small subset of 
-rotations. Note that vertex-vertex interfaces are straightforward (no rotation required since only data of a single 
-node is sent). Edge-edge interfaces only require checking for one rotation type (either we unpack forward, or backward).
-That is also quite simple.
-Face-face interfaces technically have more degrees of freedom. However let's look at all cases:
+rotations. Note that vertex-vertex interfaces require no rotation since only data of a single 
+node is sent. Edge-edge interfaces only require checking for one rotation type (either we unpack forward, or backward).
+
+Face-face interfaces technically have a larger space of possible rotations. 
+Let's look at all cases to see why there are only a few types to consider:
 
 ##### Radial direction
 
@@ -499,9 +514,16 @@ E.g.:
                                                           rotating here
 ```
 
+While the number of rotations is small, deriving the neighborhood of a subdomain is a bit tricky for all types
+of interfaces.
+It depends on the boundary type, the subdomain index, and whether the subdomain boundary 
+is located at the boundary of a diamond.
+The logic is implemented in the \ref terra::grid::shell::SubdomainNeighborhood class and executed once during the 
+construction (which is done in the \ref terra::grid::shell::DistributedDomain class).
+
 -----------
 
-### Flag fields and masks
+### Flag fields and masks {#flag-fields-and-masks}
 
 🏗️
 
