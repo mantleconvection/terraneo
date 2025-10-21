@@ -84,11 +84,17 @@ constexpr int grid_data_vec_dim()
     return -1;
 }
 
+/// @brief Enum for encoding the boundary type tuples (in \ref BoundaryVertex, \ref BoundaryEdge, \ref BoundaryFace).
 enum class BoundaryPosition : int
 {
-    P0 = 0, // start
-    P1 = 1, // end
-    PV = 2  // variable
+    /// start (`== 0`)
+    P0 = 0,
+
+    /// end (`== size - 1`)
+    P1 = 1,
+
+    /// variable
+    PV = 2
 };
 
 constexpr int boundary_position_encoding( const BoundaryPosition x, const BoundaryPosition y, const BoundaryPosition r )
@@ -96,6 +102,14 @@ constexpr int boundary_position_encoding( const BoundaryPosition x, const Bounda
     return ( static_cast< int >( x ) << 4 ) | ( static_cast< int >( y ) << 2 ) | ( static_cast< int >( r ) << 0 );
 }
 
+/// @brief Enum for identification of the 8 boundary vertices of a subdomain.
+///
+/// @code
+/// V_011
+/// => x = 0,
+///    y = size - 1,
+///    r = size - 1
+/// @endcode
 enum class BoundaryVertex : int
 {
     // (x=0, y=0, r=0)
@@ -109,6 +123,14 @@ enum class BoundaryVertex : int
     V_111 = boundary_position_encoding( BoundaryPosition::P1, BoundaryPosition::P1, BoundaryPosition::P1 ),
 };
 
+/// @brief Enum for identification of the 12 boundary edges of a subdomain.
+///
+/// @code
+/// E_1Y0
+/// => x = size - 1,
+///    y = variable,
+///    r = 0
+/// @endcode
 enum class BoundaryEdge : int
 {
     // edge along x, y=0, r=0, (:,BoundaryPosition::START,BoundaryPosition::START) in slice notation
@@ -129,6 +151,14 @@ enum class BoundaryEdge : int
     E_11R = boundary_position_encoding( BoundaryPosition::P1, BoundaryPosition::P1, BoundaryPosition::PV ),
 };
 
+/// @brief Enum for identification of the 6 boundary faces of a subdomain.
+///
+/// @code
+/// F_X1R
+/// => x = variable,
+///    y = size - 1,
+///    r = variable
+/// @endcode
 enum class BoundaryFace : int
 {
     // facet orthogonal to r, r=0
@@ -142,6 +172,7 @@ enum class BoundaryFace : int
     F_1YR = boundary_position_encoding( BoundaryPosition::P1, BoundaryPosition::PV, BoundaryPosition::PV ),
 };
 
+/// @brief Enum for the iteration direction at a boundary.
 enum class BoundaryDirection : int
 {
     FORWARD = 0,

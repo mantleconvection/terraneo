@@ -14,13 +14,28 @@
 
 namespace terra::grid::shell {
 
+/// @brief Computes the radial shell radii for a uniform grid.
+///
+/// Note that a shell is a 2D manifold in 3D space.
+/// A layer is a 3D volume in 3D space - it is sandwiched by two shells (one on each side).
+///
+/// @param r_min Radius of the innermost shell.
+/// @param r_max Radius of the outermost shell.
+/// @param num_shells Number of shells.
+/// @return Vector of shell radii (uniformly distributed in [r_min, r_max]).
 template < std::floating_point T >
 std::vector< T > uniform_shell_radii( T r_min, T r_max, int num_shells )
 {
     if ( num_shells < 2 )
     {
-        throw std::runtime_error( "Number of shells must be at least 2." );
+        Kokkos::abort( "Number of shells must be at least 2." );
     }
+
+    if ( r_min >= r_max )
+    {
+        Kokkos::abort( "r_min must be strictly less than r_max." );
+    }
+
     std::vector< T > radii;
     radii.reserve( num_shells );
     const T r_step = ( r_max - r_min ) / ( num_shells - 1 );
@@ -35,6 +50,7 @@ std::vector< T > uniform_shell_radii( T r_min, T r_max, int num_shells )
     return radii;
 }
 
+/// @brief Computes the min absolute distance of two entries in the passed vector of shell radii.
 template < std::floating_point T >
 T min_radial_h( const std::vector< T >& shell_radii )
 {
@@ -592,6 +608,11 @@ inline mpi::MPIRank subdomain_to_rank_iterate_diamond_subdomains(
 
 /// @brief Information about the thick spherical shell mesh.
 ///
+/// @note If you want to create a domain for an application, use the \ref DistributedDomain class, which constructs an
+///       instance of this class internally.
+///
+/// **General information**
+///
 /// The thick spherical shell is built from ten spherical diamonds. The diamonds are essentially curved hexahedra.
 /// The number of cells in lateral directions is required to be a power of 2, the number of cells in the radial
 /// direction can be chosen arbitrarily (though a power of two allows for maximally deep multigrid hierarchies).
@@ -607,13 +628,17 @@ inline mpi::MPIRank subdomain_to_rank_iterate_diamond_subdomains(
 ///
 /// Note that all subdomains always have the same shape.
 ///
+/// **Multigrid and coarsening**
+///
 /// Since the global number of cells in a diamond in lateral and radial direction does not need to match, and since
 /// the number of cells in radial direction does not even need to be a power of two (although it is a good idea to
 /// choose it that way), this class computes the maximum number of coarsening steps (which is equivalent to the number
 /// of "refinement levels") dynamically. Thus, a bad choice for the number of radial layers may result in a mesh that
 /// cannot be coarsened at all.
 ///
-/// This class has no notion of parallel distribution. For that refer to the DistributedDomain class.
+/// **Parallel distribution**
+///
+/// This class has no notion of parallel distribution. For that refer to the \ref DistributedDomain class.
 ///
 class DomainInfo
 {
@@ -793,39 +818,53 @@ class DomainInfo
 
 /// @brief Neighborhood information of a single subdomain.
 ///
+/// @note If you want to create a domain for an application, use the \ref terra::grid::shell::DistributedDomain class,
+///       which constructs an instance of this class internally.
+///
 /// Holds information such as the MPI ranks of the neighboring subdomains, and their orientation.
 /// Required for communication (packing, unpacking, sending, receiving 'ghost-layer' data).
 ///
-/// @details
+/// **Details on communication**
+///
 /// Data is rotated during unpacking.
 ///
-/// Sender just packs into buffer using the coordinates in order: x, y, r.
+/// *Packing/sending*
+///
+/// Sender just packs data from the grid into a buffer using the (x, y, r) coordinates in order.
 /// For instance: the face boundary xr is packed into a 2D buffer: buffer( x, r ), the face boundary yr is packed
 /// as buffer( y, r ), always iterating locally from 0 to end.
 ///
-/// Unpacking phase: when a packet from a certain neighbor subdomain arrives, we have the following information
-/// set up in this class (in the `NeighborSubdomainTupleFace` instances):
+/// *Unpacking*
 ///
-/// At each boundary face of a local subdomain we have a list of tuples with entries:
+/// When a packet from a certain neighbor subdomain arrives, we have the following information
+/// set up in this class (for instance in the `NeighborSubdomainTupleFace` instances):
+///
+/// *Organization*
+///
+/// At each boundary face of a local subdomain we store in this class a list of tuples with entries:
 ///
 /// SubdomainInfo:         neighboring subdomain identifier
 /// BoundaryFace:          boundary face of the neighboring subdomain (from its local view)
-/// UnpackingOrderingFace: information how to iterate over the buffer for each coordinate
+/// UnpackingOrderingFace: information how to iterate over the buffer for each coordinate during unpacking
 ///
-/// An example:
-/// @code
-/// recv boundary face:              F_X1R (at the face boundary where y == end)
-/// neighbor boundary face (sender): F_1YR (at the face boundary where x == end)
-/// unpacking ordering:              (BACKWARD, FORWARD)
-/// @endcode
-///
-/// So e.g., on the receiver side we have the data:
+/// So e.g., the data (for some subdomain):
 ///
 /// @code
 ///   neighborhood_face_[ F_X1R ] = { neighbor_subdomain_info, F_1YR, (BACKWARD, FORWARD), neighbor_rank }
 /// @endcode
 ///
-/// Execution:
+/// means that for this subdomain, the boundary face `F_X1R` interfaces with the neighbor subdomain
+/// `neighbor_subdomain_info`, at its boundary `F_1YR`, that is located on rank `neighbor_rank`.
+/// If we unpack data that we receive from the subdomain, we must invert the iteration over the first
+/// buffer index, and move forward in the second index.
+///
+/// @note See \ref terra::grid::BoundaryVertex, \ref terra::grid::BoundaryEdge, \ref terra::grid::BoundaryFace,
+///       \ref terra::grid::BoundaryDirection for details on the naming convention of the boundary types like `F_X1R`.
+///       Roughly: `0 == start`, `1 == end`, `X == varying in x`, `Y == varying in y`, `R == varying in r`.
+///
+/// *Execution*
+///
+/// Let's assume we receive data from the neighbor specified above.
 ///
 /// Sender side:
 ///
@@ -845,10 +884,12 @@ class DomainInfo
 ///                                               == const
 /// @endcode
 ///
-/// @note: It is due to the structure of the spherical shell mesh that we never have to swap the indices!
-///        Thus, it is sufficient to have the FORWARD/BACKWARD tuple! The radial direction is always radial.
-///        And if we communicate in radial direction (i.e., sending "xy-planes") then we never need to swap since
-///        we are in the same diamond.
+/// @note It is due to the structure of the spherical shell mesh that we never have to swap the indices!
+///       (For vertex boundaries this is anyway not required (0D array) and for edges neither (1D array - we only
+///       have forward and backward iteration).)
+///       Thus, it is enough to have the FORWARD/BACKWARD tuple! The radial direction is always radial.
+///       And if we communicate in the radial direction (i.e., sending "xy-planes") then we never need to swap since
+///       we are in the same diamond.
 ///
 class SubdomainNeighborhood
 {
@@ -901,7 +942,7 @@ class SubdomainNeighborhood
         /////////////////////
         // Face boundaries //
         /////////////////////
-#if 1
+
         for ( const auto boundary_face : all_boundary_faces )
         {
             const bool diamond_diamond_boundary =
@@ -1110,11 +1151,11 @@ class SubdomainNeighborhood
                 }
             }
         }
-#endif
+
         /////////////////////
         // Edge boundaries //
         /////////////////////
-#if 1
+
         for ( const auto boundary_edge : all_boundary_edges )
         {
             // Now only the edges at the poles that are not already part of the faces remain.
@@ -1712,12 +1753,11 @@ class SubdomainNeighborhood
                       -1 } );
             }
         }
-#endif
 
         ///////////////////////
         // Vertex boundaries //
         ///////////////////////
-#if 1
+
         for ( const auto boundary_vertex : all_boundary_vertices )
         {
             // Across diamond boundaries
@@ -2195,395 +2235,8 @@ class SubdomainNeighborhood
                 Kokkos::abort( "Invalid diamond ID." );
             }
 
-#if 0
-            if ( diamond_id >= 0 && diamond_id <= 4 )
-            {
-                if ( subdomain_x == 0 && subdomain_y > 0 )
-                {
-                    // Northern hemisphere to the right.
-
-                    if ( boundary_vertex == BoundaryVertex::V_000 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_000].emplace_back(
-                            SubdomainInfo( ( diamond_id + 1 ) % 5, subdomain_y - 1, 0, subdomain_r ),
-                            BoundaryVertex::V_100,
-                            -1 );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_001 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_001].emplace_back(
-                            SubdomainInfo( ( diamond_id + 1 ) % 5, subdomain_y - 1, 0, subdomain_r ),
-                            BoundaryVertex::V_101,
-                            -1 );
-                    }
-                }
-                else if ( subdomain_x > 0 && subdomain_y == 0 )
-                {
-                    // Northern hemisphere to the left.
-
-                    if ( boundary_vertex == BoundaryVertex::V_000 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_000].emplace_back(
-                            SubdomainInfo( ( diamond_id + 4 ) % 5, 0, subdomain_x - 1, subdomain_r ),
-                            BoundaryVertex::V_010,
-                            -1 );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_001 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_001].emplace_back(
-                            SubdomainInfo( ( diamond_id + 4 ) % 5, 0, subdomain_x - 1, subdomain_r ),
-                            BoundaryVertex::V_011,
-                            -1 );
-                    }
-                }
-
-                if ( subdomain_x == 0 && subdomain_y < num_lateral_subdomains - 1 )
-                {
-                    // Northern hemisphere to the right
-
-                    if ( boundary_vertex == BoundaryVertex::V_010 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_010].push_back(
-                            { SubdomainInfo( ( diamond_id + 1 ) % 5, subdomain_y + 1, 0, subdomain_r ),
-                              BoundaryVertex::V_000,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_011 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_011].push_back(
-                            { SubdomainInfo( ( diamond_id + 1 ) % 5, subdomain_y + 1, 0, subdomain_r ),
-                              BoundaryVertex::V_001,
-                              -1 } );
-                    }
-                }
-
-                else if ( subdomain_x > 0 && subdomain_y == num_lateral_subdomains - 1 )
-                {
-                    // Northern hemisphere to the right and southern
-
-                    if ( boundary_vertex == BoundaryVertex::V_010 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_010].push_back(
-                            { SubdomainInfo(
-                                  diamond_id + 5,
-                                  num_lateral_subdomains - 1,
-                                  num_lateral_subdomains - subdomain_x,
-                                  subdomain_r ),
-                              BoundaryVertex::V_100,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_011 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_011].push_back(
-                            { SubdomainInfo(
-                                  diamond_id + 5,
-                                  num_lateral_subdomains - 1,
-                                  num_lateral_subdomains - subdomain_x,
-                                  subdomain_r ),
-                              BoundaryVertex::V_101,
-                              -1 } );
-                    }
-                }
-
-                if ( subdomain_y == 0 && subdomain_x < num_lateral_subdomains - 1 )
-                {
-                    // Northern hemisphere to the left
-
-                    if ( boundary_vertex == BoundaryVertex::V_100 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_100].push_back(
-                            { SubdomainInfo( ( diamond_id + 4 ) % 5, 0, subdomain_x + 1, subdomain_r ),
-                              BoundaryVertex::V_000,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_101 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_101].push_back(
-                            { SubdomainInfo( ( diamond_id + 4 ) % 5, 0, subdomain_x + 1, subdomain_r ),
-                              BoundaryVertex::V_001,
-                              -1 } );
-                    }
-                }
-                else if ( subdomain_y > 0 && subdomain_x == num_lateral_subdomains - 1 )
-                {
-                    // Northern hemisphere to the left and southern
-
-                    if ( boundary_vertex == BoundaryVertex::V_100 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_100].push_back(
-                            { SubdomainInfo(
-                                  ( diamond_id + 4 ) % 5 + 5,
-                                  num_lateral_subdomains - subdomain_y,
-                                  num_lateral_subdomains - 1,
-                                  subdomain_r ),
-                              BoundaryVertex::V_010,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_101 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_101].push_back(
-                            { SubdomainInfo(
-                                  ( diamond_id + 4 ) % 5 + 5,
-                                  num_lateral_subdomains - subdomain_y,
-                                  num_lateral_subdomains - 1,
-                                  subdomain_r ),
-                              BoundaryVertex::V_011,
-                              -1 } );
-                    }
-                }
-
-                if ( subdomain_x < num_lateral_subdomains - 1 && subdomain_y == num_lateral_subdomains - 1 )
-                {
-                    // Northern hemi to southern (right)
-
-                    if ( boundary_vertex == BoundaryVertex::V_110 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_110].push_back(
-                            { SubdomainInfo(
-                                  diamond_id + 5,
-                                  num_lateral_subdomains - 1,
-                                  num_lateral_subdomains - subdomain_x - 2,
-                                  subdomain_r ),
-                              BoundaryVertex::V_110,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_111 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_111].push_back(
-                            { SubdomainInfo(
-                                  diamond_id + 5,
-                                  num_lateral_subdomains - 1,
-                                  num_lateral_subdomains - subdomain_x - 2,
-                                  subdomain_r ),
-                              BoundaryVertex::V_111,
-                              -1 } );
-                    }
-                }
-                else if ( subdomain_y < num_lateral_subdomains - 1 && subdomain_x == num_lateral_subdomains - 1 )
-                {
-                    // Northern hemi to southern (left)
-
-                    if ( boundary_vertex == BoundaryVertex::V_110 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_110].push_back(
-                            { SubdomainInfo(
-                                  ( diamond_id + 4 ) % 5 + 5,
-                                  num_lateral_subdomains - subdomain_y - 2,
-                                  num_lateral_subdomains - 1,
-                                  subdomain_r ),
-                              BoundaryVertex::V_110,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_111 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_111].push_back(
-                            { SubdomainInfo(
-                                  ( diamond_id + 4 ) % 5 + 5,
-                                  num_lateral_subdomains - subdomain_y - 2,
-                                  num_lateral_subdomains - 1,
-                                  subdomain_r ),
-                              BoundaryVertex::V_111,
-                              -1 } );
-                    }
-                }
-            }
-            else if ( diamond_id >= 5 && diamond_id <= 9 )
-            {
-                if ( subdomain_x == 0 && subdomain_y > 0 )
-                {
-                    // Southern hemisphere to the right.
-
-                    if ( boundary_vertex == BoundaryVertex::V_000 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_000].push_back(
-                            { SubdomainInfo( ( diamond_id + 1 ) % 5 + 5, subdomain_y - 1, 0, subdomain_r ),
-                              BoundaryVertex::V_100,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_001 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_001].push_back(
-                            { SubdomainInfo( ( diamond_id + 1 ) % 5 + 5, subdomain_y - 1, 0, subdomain_r ),
-                              BoundaryVertex::V_101,
-                              -1 } );
-                    }
-                }
-                else if ( subdomain_x > 0 && subdomain_y == 0 )
-                {
-                    // Southern hemisphere to the left.
-
-                    if ( boundary_vertex == BoundaryVertex::V_000 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_000].push_back(
-                            { SubdomainInfo( ( diamond_id + 4 ) % 5 + 5, 0, subdomain_x - 1, subdomain_r ),
-                              BoundaryVertex::V_010,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_001 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_001].push_back(
-                            { SubdomainInfo( ( diamond_id + 4 ) % 5 + 5, 0, subdomain_x - 1, subdomain_r ),
-                              BoundaryVertex::V_011,
-                              -1 } );
-                    }
-                }
-
-                if ( subdomain_x == 0 && subdomain_y < num_lateral_subdomains - 1 )
-                {
-                    // Southern hemisphere to the right
-
-                    if ( boundary_vertex == BoundaryVertex::V_010 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_010].push_back(
-                            { SubdomainInfo( ( diamond_id + 1 ) % 5 + 5, subdomain_y + 1, 0, subdomain_r ),
-                              BoundaryVertex::V_000,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_011 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_011].push_back(
-                            { SubdomainInfo( ( diamond_id + 1 ) % 5 + 5, subdomain_y + 1, 0, subdomain_r ),
-                              BoundaryVertex::V_001,
-                              -1 } );
-                    }
-                }
-
-                else if ( subdomain_x > 0 && subdomain_y == num_lateral_subdomains - 1 )
-                {
-                    // Southern hemisphere to the right and north
-
-                    if ( boundary_vertex == BoundaryVertex::V_010 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_010].push_back(
-                            { SubdomainInfo(
-                                  ( diamond_id + 1 ) % 5,
-                                  num_lateral_subdomains - 1,
-                                  num_lateral_subdomains - subdomain_x,
-                                  subdomain_r ),
-                              BoundaryVertex::V_100,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_011 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_011].push_back(
-                            { SubdomainInfo(
-                                  ( diamond_id + 1 ) % 5,
-                                  num_lateral_subdomains - 1,
-                                  num_lateral_subdomains - subdomain_x,
-                                  subdomain_r ),
-                              BoundaryVertex::V_101,
-                              -1 } );
-                    }
-                }
-
-                if ( subdomain_y == 0 && subdomain_x < num_lateral_subdomains - 1 )
-                {
-                    // Southern hemisphere to the left
-
-                    if ( boundary_vertex == BoundaryVertex::V_100 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_100].push_back(
-                            { SubdomainInfo( ( diamond_id - 1 ) % 5 + 5, 0, subdomain_x + 1, subdomain_r ),
-                              BoundaryVertex::V_000,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_101 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_101].push_back(
-                            { SubdomainInfo( ( diamond_id - 1 ) % 5 + 5, 0, subdomain_x + 1, subdomain_r ),
-                              BoundaryVertex::V_001,
-                              -1 } );
-                    }
-                }
-                else if ( subdomain_y > 0 && subdomain_x == num_lateral_subdomains - 1 )
-                {
-                    // Southern hemisphere to the left and northern
-
-                    if ( boundary_vertex == BoundaryVertex::V_100 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_100].push_back(
-                            { SubdomainInfo(
-                                  diamond_id - 5,
-                                  num_lateral_subdomains - subdomain_y,
-                                  num_lateral_subdomains - 1,
-                                  subdomain_r ),
-                              BoundaryVertex::V_010,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_101 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_101].push_back(
-                            { SubdomainInfo(
-                                  diamond_id - 5,
-                                  num_lateral_subdomains - subdomain_y,
-                                  num_lateral_subdomains - 1,
-                                  subdomain_r ),
-                              BoundaryVertex::V_011,
-                              -1 } );
-                    }
-                }
-
-                if ( subdomain_x < num_lateral_subdomains - 1 && subdomain_y == num_lateral_subdomains - 1 )
-                {
-                    // Southern hemi to northern (right)
-
-                    if ( boundary_vertex == BoundaryVertex::V_110 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_110].push_back(
-                            { SubdomainInfo(
-                                  ( diamond_id - 4 ) % 5,
-                                  num_lateral_subdomains - 1,
-                                  num_lateral_subdomains - subdomain_x - 2,
-                                  subdomain_r ),
-                              BoundaryVertex::V_110,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_111 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_111].push_back(
-                            { SubdomainInfo(
-                                  ( diamond_id - 4 ) % 5,
-                                  num_lateral_subdomains - 1,
-                                  num_lateral_subdomains - subdomain_x - 2,
-                                  subdomain_r ),
-                              BoundaryVertex::V_111,
-                              -1 } );
-                    }
-                }
-                else if ( subdomain_y < num_lateral_subdomains - 1 && subdomain_x == num_lateral_subdomains - 1 )
-                {
-                    // Southern hemi to northern (left)
-                    if ( boundary_vertex == BoundaryVertex::V_110 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_110].push_back(
-                            { SubdomainInfo(
-                                  diamond_id - 5,
-                                  num_lateral_subdomains - subdomain_y - 2,
-                                  num_lateral_subdomains - 1,
-                                  subdomain_r ),
-                              BoundaryVertex::V_110,
-                              -1 } );
-                    }
-                    else if ( boundary_vertex == BoundaryVertex::V_111 )
-                    {
-                        neighborhood_vertex_[BoundaryVertex::V_111].push_back(
-                            { SubdomainInfo(
-                                  diamond_id - 5,
-                                  num_lateral_subdomains - subdomain_y - 2,
-                                  num_lateral_subdomains - 1,
-                                  subdomain_r ),
-                              BoundaryVertex::V_111,
-                              -1 } );
-                    }
-                }
-            }
-            else
-            {
-                Kokkos::abort( "Invalid diamond ID." );
-            }
-#endif
             // Same diamond:
-#if 1
+
             if ( boundary_vertex == BoundaryVertex::V_000 && subdomain_x > 0 && subdomain_y > 0 && subdomain_r > 0 )
             {
                 neighborhood_vertex_[boundary_vertex].push_back(
@@ -2654,9 +2307,8 @@ class SubdomainNeighborhood
                       BoundaryVertex::V_000,
                       -1 } );
             }
-#endif
         }
-#endif
+
         // Assigning ranks.
 
         for ( auto& neighbors : neighborhood_vertex_ | std::views::values )
@@ -2696,8 +2348,11 @@ class SubdomainNeighborhood
     std::map< BoundaryFace, NeighborSubdomainTupleFace >                    neighborhood_face_;
 };
 
-/// @brief Holds the DomainInfo plus the neighborhood information (SubdomainNeighborhood) for all process-local
-///        subdomains.
+/// @brief Parallel data structure organizing the thick spherical shell metadata for distributed (MPI parallel)
+///        simulations.
+///
+/// This is essentially a wrapper for the \ref DomainInfo and the neighborhood information (\ref SubdomainNeighborhood)
+/// for all process-local subdomains.
 class DistributedDomain
 {
   public:
@@ -2705,7 +2360,8 @@ class DistributedDomain
 
     using LocalSubdomainIdx = int;
 
-    /// @brief Creates a Domain with a single subdomain per diamond and initializes all the subdomain neighborhoods.
+    /// @brief Creates a \ref DistributedDomain with a single subdomain per diamond and initializes all the subdomain
+    ///        neighborhoods.
     static DistributedDomain create_uniform_single_subdomain_per_diamond(
         const int                                  lateral_diamond_refinement_level,
         const int                                  radial_diamond_refinement_level,
@@ -2721,7 +2377,8 @@ class DistributedDomain
             subdomain_to_rank );
     }
 
-    /// @brief Creates a Domain with a single subdomain per diamond and initializes all the subdomain neighborhoods.
+    /// @brief Creates a \ref DistributedDomain with a single subdomain per diamond and initializes all the subdomain
+    ///        neighborhoods.
     static DistributedDomain create_uniform_single_subdomain_per_diamond(
         const int                                  lateral_diamond_refinement_level,
         const std::vector< double >&               radii,
@@ -2730,7 +2387,8 @@ class DistributedDomain
         return create_uniform( lateral_diamond_refinement_level, radii, 0, 0, subdomain_to_rank );
     }
 
-    /// @brief Creates a Domain with a single subdomain per diamond and initializes all the subdomain neighborhoods.
+    /// @brief Creates a \ref DistributedDomain with a single subdomain per diamond and initializes all the subdomain
+    ///        neighborhoods.
     static DistributedDomain create_uniform(
         const int                                  lateral_diamond_refinement_level,
         const int                                  radial_diamond_refinement_level,
@@ -2748,7 +2406,8 @@ class DistributedDomain
             subdomain_to_rank );
     }
 
-    /// @brief Creates a Domain with a single subdomain per diamond and initializes all the subdomain neighborhoods.
+    /// @brief Creates a \ref DistributedDomain with a single subdomain per diamond and initializes all the subdomain
+    ///        neighborhoods.
     static DistributedDomain create_uniform(
         const int                                  lateral_diamond_refinement_level,
         const std::vector< double >&               radii,
@@ -2772,6 +2431,7 @@ class DistributedDomain
         return domain;
     }
 
+    /// @brief Returns a const reference
     const DomainInfo& domain_info() const { return domain_info_; }
     const std::map< SubdomainInfo, std::tuple< LocalSubdomainIdx, SubdomainNeighborhood > >& subdomains() const
     {

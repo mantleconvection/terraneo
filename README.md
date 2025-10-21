@@ -49,16 +49,20 @@ Note the capitalization: it must be `Kokkos_ENABLE_CUDA=ON`, NOT `KOKKOS_ENABLE_
   suppose we need Galerkin coarse grid operators maybe)
 - [x] MPI parallel execution (multi-GPU, multi-node CPU)
 - [ ] intra-diamond subdomain communication (then also test/fix boundary handling in operators/tests - subdomain
-  boundaries are sometimes treated as domain boundaries even if they are not)
+      boundaries are sometimes treated as domain boundaries even if they are not)
 - [ ] variable viscosity
 - [ ] plates
 - [ ] free-slip
 - [ ] compressible Stokes
-- [x] FGMRES (BiCGStab works well mostly - but seems to randomly produce NaNs occasionally (not 100% sure if related to the solver but it is very likely))
+- [x] FGMRES (BiCGStab works well mostly - but seems to randomly produce NaNs occasionally (not 100% sure if related to 
+      the solver, but it is very likely))
 - [ ] Galerkin coarsening
 - [ ] iterative refinement
 - [ ] spherical harmonics helper
 - [ ] radial profiles loader
+- [ ] checkpoints (re-use XDMF bin files!)
+- [ ] return unmanaged views from SubdomainNeighborhoodSendRecvBuffer that point to contiguous memory per rank, add 
+      another getter to the pointer of that array and then pass that to MPI_Send/Recv instead 
 - [x] radial layer data assimilation
 - [x] timing(tree?)
 - [x] ~~compress VTK(?)~~ XDMF output (binary, actual float data, and ~~/or~~ ~~HDF5/ADIOS2~~ with a single mesh file)

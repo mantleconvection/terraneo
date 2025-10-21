@@ -284,6 +284,7 @@ and pieced together recovers the spherical shell:
 
 \image html figures/thick-spherical-shell-diamond-net.jpg
 
+Indexing in radial direction always goes from the inner boundary to the outer boundary.
 Note that the extrusion in radial direction is not visible from the net.
 
 Each diamond can (optionally) be subdivided in lateral and radial direction. The radial refinement is straightforward.
