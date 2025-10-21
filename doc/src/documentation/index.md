@@ -1,10 +1,16 @@
 # Documentation {#main}
 
+\if NOT_DOXYGEN_GENERATED
+
+> It seems you are viewing this in plain text or with a standard Markdown renderer (e.g., on GitHub).
+> 
 > ❗️This file is best read in HTML format after generating the documentation via running `doxygen` inside of `doc/src/`.
+
+\endif
 
 ## About
 
-TerraNeoX is a mantle convection code based on [Kokkos](https://github.com/kokkos/kokkos) for performance portability.
+**TerraNeoX** is a mantle convection code based on [Kokkos](https://github.com/kokkos/kokkos) for performance portability.
 
 \docseplarge
 
