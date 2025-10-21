@@ -48,7 +48,7 @@ Note the capitalization: it must be `Kokkos_ENABLE_CUDA=ON`, NOT `KOKKOS_ENABLE_
   rates., I
   suppose we need Galerkin coarse grid operators maybe)
 - [x] MPI parallel execution (multi-GPU, multi-node CPU)
-- [ ] intra-diamond subdomain communication (then also test/fix boundary handling in operators/tests - subdomain
+- [x] intra-diamond subdomain communication (then also test/fix boundary handling in operators/tests - subdomain
       boundaries are sometimes treated as domain boundaries even if they are not)
 - [ ] variable viscosity
 - [ ] plates
