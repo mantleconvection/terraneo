@@ -1,7 +1,7 @@
 # Documentation of TerraNeoX
 
 * `documents/`  
-Contains any kinds of supplementary documentation.
+Contains any kinds of supplementary documentation (LaTeX, PDF, etc.).
 
 * `src/`  
-Doxygen documentation generated from the C++ source code.
+Main documentation (generated via Doxygen from Markdown files and from the C++ source code).
