@@ -20,10 +20,10 @@ inline grid::Grid4DDataScalar< util::MaskType > setup_mask_data( const grid::she
         grid::shell::allocate_scalar_grid< util::MaskType >( "mask_data", domain );
 
     auto tmp_data_for_global_subdomain_indices =
-        grid::shell::allocate_scalar_grid< int >( "tmp_data_for_global_subdomain_indices", domain );
+        grid::shell::allocate_scalar_grid< int64_t >( "tmp_data_for_global_subdomain_indices", domain );
 
-    communication::shell::SubdomainNeighborhoodSendRecvBuffer< int > send_buffers( domain );
-    communication::shell::SubdomainNeighborhoodSendRecvBuffer< int > recv_buffers( domain );
+    communication::shell::SubdomainNeighborhoodSendRecvBuffer< int64_t > send_buffers( domain );
+    communication::shell::SubdomainNeighborhoodSendRecvBuffer< int64_t > recv_buffers( domain );
 
     // Interpolate the unique subdomain ID.
     for ( const auto& [subdomain_info, value] : domain.subdomains() )
@@ -46,10 +46,7 @@ inline grid::Grid4DDataScalar< util::MaskType > setup_mask_data( const grid::she
         domain, tmp_data_for_global_subdomain_indices, send_buffers, recv_buffers );
 
     terra::communication::shell::unpack_and_reduce_local_subdomain_boundaries(
-        domain,
-        tmp_data_for_global_subdomain_indices,
-        recv_buffers,
-        communication::CommunicationReduction::MIN );
+        domain, tmp_data_for_global_subdomain_indices, recv_buffers, communication::CommunicationReduction::MIN );
 
     // Set all nodes to 1 if the global_subdomain_id matches - 0 otherwise.
     for ( const auto& [subdomain_info, value] : domain.subdomains() )

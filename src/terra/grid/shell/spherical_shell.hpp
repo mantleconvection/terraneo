@@ -488,11 +488,11 @@ class SubdomainInfo
     , subdomain_r_( subdomain_r )
     {}
 
-    explicit SubdomainInfo( const int global_id )
-    : diamond_id_( ( global_id >> 27 ) )
-    , subdomain_x_( ( global_id >> 0 ) & 511 )
-    , subdomain_y_( ( global_id >> 9 ) & 511 )
-    , subdomain_r_( ( global_id >> 18 ) & 511 )
+    explicit SubdomainInfo( const int64_t global_id )
+    : diamond_id_( static_cast< int >( ( global_id >> 57 ) ) )
+    , subdomain_x_( static_cast< int >( ( global_id >> 0 ) & ( ( 1 << 19 ) - 1 ) ) )
+    , subdomain_y_( static_cast< int >( ( global_id >> 19 ) & ( ( 1 << 19 ) - 1 ) ) )
+    , subdomain_r_( static_cast< int >( ( global_id >> 38 ) & ( ( 1 << 19 ) - 1 ) ) )
     {
         if ( global_id != this->global_id() )
         {
@@ -525,19 +525,20 @@ class SubdomainInfo
     }
 
     /// @brief Scrambles the four indices (diamond ID, x, y, r) into a single integer.
-    int global_id() const
+    [[nodiscard]] int64_t global_id() const
     {
         if ( diamond_id_ >= 10 )
         {
             throw std::logic_error( "Diamond ID must be less than 10." );
         }
 
-        if ( subdomain_x_ > 511 || subdomain_y_ > 511 || subdomain_r_ > 511 )
+        if ( subdomain_x_ > ( 1 << 19 ) - 1 || subdomain_y_ > ( 1 << 19 ) - 1 || subdomain_r_ > ( 1 << 19 ) - 1 )
         {
             throw std::logic_error( "Subdomain indices too large." );
         }
 
-        return ( diamond_id_ << 27 ) | ( subdomain_r_ << 18 ) | ( subdomain_y_ << 9 ) | ( subdomain_x_ );
+        return ( static_cast< int64_t >( diamond_id_ ) << 57 ) | ( static_cast< int64_t >( subdomain_r_ ) << 38 ) |
+               ( static_cast< int64_t >( subdomain_y_ ) << 19 ) | ( static_cast< int64_t >( subdomain_x_ ) );
     }
 
   private:
