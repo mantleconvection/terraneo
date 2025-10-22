@@ -53,6 +53,28 @@ Note the capitalization: it must be `Kokkos_ENABLE_CUDA=ON`, NOT `KOKKOS_ENABLE_
 
 \docseplarge
 
+## Compiling on the NHR systems, e.g. helma (NVIDIA H100 GPUs):
+
+Access form: https://hpc.fau.de/access-to-helma/
+
+SSH Connect and other info on helma: https://doc.nhr.fau.de/clusters/helma/
+
+```
+$ module load openmpi/5.0.5-nvhpc24.11-cuda
+$ module load cmake
+$ mkdir terra-kokkos-build
+$ cd terra-kokkos-build
+
+# give parallel backend and architecture via cmake (Kokkos may be unable to autodetect the arch)
+$ cmake ../terra-kokkos -DKokkos_ENABLE_CUDA=ON -DKokkos_ARCH_HOPPER90=ON
+
+# Build tests
+$ cd tests
+$ make -j 16
+```
+
+\docseplarge
+
 # Project Structure
 
 ```
@@ -92,7 +114,8 @@ terraneox/
 - [x] MPI parallel execution (multi-GPU, multi-node CPU)
 - [x] intra-diamond subdomain communication (then also test/fix boundary handling in operators/tests - subdomain
   boundaries are sometimes treated as domain boundaries even if they are not)
-- [ ] variable viscosity
+- [x] variable viscosity
+- [x] full stokes
 - [ ] plates
 - [ ] free-slip
 - [ ] compressible Stokes
