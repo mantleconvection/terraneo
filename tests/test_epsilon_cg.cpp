@@ -62,7 +62,6 @@ struct SolutionInterpolator
                 2 * Kokkos::sin( 2 * coords( 1 ) ) * Kokkos::sin( 2 * coords( 2 ) ) * Kokkos::sinh( coords( 0 ) );
             data_( local_subdomain_id, x, y, r, 2 ) =
                 4 * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sin( 2 * coords( 1 ) ) * Kokkos::sinh( coords( 2 ) );
-
         }
     }
 };
@@ -167,7 +166,6 @@ struct RHSInterpolator
                 x6 * ( -x4 + 2.0 * x5 * Kokkos::cos( x0 ) * Kokkos::sinh( coords( 1 ) ) ) -
                 x6 * ( -x4 + 4.0 * x5 * Kokkos::cos( x1 ) * Kokkos::sinh( coords( 0 ) ) );
         }
-
     }
 };
 
@@ -202,8 +200,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     using ScalarType = double;
 
-    const auto domain = DistributedDomain::create_uniform_single_subdomain(
-        level, level, 0.5, 1.0, grid::shell::subdomain_to_rank_distribute_full_diamonds );
+    const auto domain = DistributedDomain::create_uniform_single_subdomain_per_diamond( level, level, 0.5, 1.0 );
 
     auto mask_data = linalg::setup_mask_data( domain );
 
@@ -306,20 +303,22 @@ int main( int argc, char** argv )
         const auto time_total = timer.seconds();
         table->add_row( { { "level", level }, { "time_total", time_total } } );
 
-            const double order = prev_l2_error / l2_error;
-            std::cout << "error = " << l2_error << std::endl;
-            std::cout << "order = " << order << std::endl;
-            std::cout << "time_total = " << time_total << std::endl;
-            /*if ( order < 3.8 )
+        const double order = prev_l2_error / l2_error;
+        std::cout << "error = " << l2_error << std::endl;
+        std::cout << "order = " << order << std::endl;
+        std::cout << "time_total = " << time_total << std::endl;
+        /*if ( order < 3.8 )
             {
                 return EXIT_FAILURE;
             }*/
 
-            table->add_row( { { "level", level }, { "order", prev_l2_error / l2_error } } );
+        table->add_row( { { "level", level }, { "order", prev_l2_error / l2_error } } );
         prev_l2_error = l2_error;
     }
 
     table->query_rows_not_none( "order" ).select_columns( { "level", "order" } ).print_pretty();
-    table->query_rows_not_none( "dofs" ).select_columns( { "level", "dofs", "l2_error","time_solver" } ).print_pretty();
+    table->query_rows_not_none( "dofs" )
+        .select_columns( { "level", "dofs", "l2_error", "time_solver" } )
+        .print_pretty();
     return 0;
 }

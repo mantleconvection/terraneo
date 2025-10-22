@@ -194,10 +194,9 @@ std::pair< double, double > test( int level, const std::shared_ptr< util::Table 
 {
     using ScalarType = double;
 
-    const auto domain_fine = DistributedDomain::create_uniform_single_subdomain(
-        level, level, 0.5, 1.0, grid::shell::subdomain_to_rank_distribute_full_diamonds );
-    const auto domain_coarse = DistributedDomain::create_uniform_single_subdomain(
-        level - 1, level - 1, 0.5, 1.0, grid::shell::subdomain_to_rank_distribute_full_diamonds );
+    const auto domain_fine = DistributedDomain::create_uniform_single_subdomain_per_diamond( level, level, 0.5, 1.0 );
+    const auto domain_coarse =
+        DistributedDomain::create_uniform_single_subdomain_per_diamond( level - 1, level - 1, 0.5, 1.0 );
 
     const auto subdomain_fine_shell_coords =
         terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain_fine );
@@ -358,7 +357,7 @@ int main( int argc, char** argv )
         const double order_pre = prev_l2_error_pre / l2_error_pre;
 
         table->add_row( { { "level", level }, { "order_vel", order_vel }, { "order_pre", order_pre } } );
-    
+
         prev_l2_error_vel = l2_error_vel;
         prev_l2_error_pre = l2_error_pre;
     }

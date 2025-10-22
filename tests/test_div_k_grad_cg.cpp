@@ -78,14 +78,14 @@ struct RHSInterpolator
     void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
     {
         const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
-       
-        const double                  x0     = 2 * coords(2);
-        const double                  x1     = Kokkos::sin( 2 * coords(0) ) * Kokkos::sinh( coords(1) );
-        const double                  value =
-            3.5 * x1 * ( Kokkos::sin(coords(2)) + 2 ) * Kokkos::sin( x0 ) - 1.0 * x1 * Kokkos::cos( x0 )*Kokkos::cos(coords(2));
-       
-      //  const double                  value =
-      //     7.0*Kokkos::sin(2*coords(0))*Kokkos::sin(2*coords(2))*Kokkos::sinh(coords(1));
+
+        const double x0    = 2 * coords( 2 );
+        const double x1    = Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
+        const double value = 3.5 * x1 * ( Kokkos::sin( coords( 2 ) ) + 2 ) * Kokkos::sin( x0 ) -
+                             1.0 * x1 * Kokkos::cos( x0 ) * Kokkos::cos( coords( 2 ) );
+
+        //  const double                  value =
+        //     7.0*Kokkos::sin(2*coords(0))*Kokkos::sin(2*coords(2))*Kokkos::sinh(coords(1));
         data_( local_subdomain_id, x, y, r ) = value;
     }
 };
@@ -109,7 +109,7 @@ struct KInterpolator
     void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
     {
         const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
-        const double                  value  = 2+Kokkos::sin(coords(2)) ;
+        const double                  value  = 2 + Kokkos::sin( coords( 2 ) );
         data_( local_subdomain_id, x, y, r ) = value;
     }
 };
@@ -142,8 +142,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     using ScalarType = double;
 
-    const auto domain = DistributedDomain::create_uniform_single_subdomain(
-        level, level, 0.5, 1.0, grid::shell::subdomain_to_rank_distribute_full_diamonds );
+    const auto domain = DistributedDomain::create_uniform_single_subdomain_per_diamond( level, level, 0.5, 1.0 );
 
     auto mask_data = linalg::setup_mask_data( domain );
 
@@ -163,7 +162,6 @@ double test( int level, const std::shared_ptr< util::Table >& table )
     const auto coords_radii = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
 
     using DivKGrad = fe::wedge::operators::shell::DivKGrad< ScalarType >;
-
 
     DivKGrad A( domain, coords_shell, coords_radii, k.grid_data(), true, false );
     DivKGrad A_neumann( domain, coords_shell, coords_radii, k.grid_data(), false, false );
@@ -212,7 +210,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     Kokkos::fence();
 
-    linalg::solvers::IterativeSolverParameters solver_params{1000, 1e-15, 1e-15 };
+    linalg::solvers::IterativeSolverParameters solver_params{ 1000, 1e-15, 1e-15 };
 
     linalg::solvers::PCG< DivKGrad > pcg( solver_params, table, { tmp, Adiagg, error, r } );
     pcg.set_tag( "pcg_solver_level_" + std::to_string( level ) );
@@ -231,11 +229,11 @@ double test( int level, const std::shared_ptr< util::Table >& table )
         visualization::XDMFOutput< double > xdmf( ".", coords_shell, coords_radii );
         xdmf.add( g.grid_data() );
         xdmf.add( u.grid_data() );
-       // xdmf.add( k.grid_data() );
+        // xdmf.add( k.grid_data() );
         xdmf.add( b.grid_data() );
         xdmf.add( solution.grid_data() );
         xdmf.add( error.grid_data() );
-        xdmf.add( A.k_grid_data());
+        xdmf.add( A.k_grid_data() );
         xdmf.write();
     }
 
@@ -268,7 +266,7 @@ int main( int argc, char** argv )
             const double order = prev_l2_error / l2_error;
             std::cout << "error = " << l2_error << std::endl;
             std::cout << "order = " << order << std::endl;
-           /* if ( order < 3.4 )
+            /* if ( order < 3.4 )
             {
                 return EXIT_FAILURE;
             }

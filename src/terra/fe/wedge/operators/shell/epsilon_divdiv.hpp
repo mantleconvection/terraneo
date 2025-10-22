@@ -24,8 +24,9 @@ class EpsilonDivDiv
   private:
     grid::shell::DistributedDomain domain_;
 
-    grid::Grid3DDataVec< ScalarT, 3 > grid_;
-    grid::Grid2DDataScalar< ScalarT > radii_;
+    grid::Grid3DDataVec< ScalarT, 3 >    grid_;
+    grid::Grid2DDataScalar< ScalarT >    radii_;
+    grid::Grid4DDataScalar< ScalarType > k_;
 
     bool treat_boundary_;
     bool diagonal_;
@@ -38,7 +39,6 @@ class EpsilonDivDiv
 
     grid::Grid4DDataVec< ScalarType, VecDim > src_;
     grid::Grid4DDataVec< ScalarType, VecDim > dst_;
-    grid::Grid4DDataScalar< ScalarType >      k_;
 
   public:
     EpsilonDivDiv(

@@ -144,7 +144,7 @@ class BoundaryMass
         // For now, compute the local element matrix. We'll improve that later.
         dense::Mat< ScalarT, 6, 6 > A[num_wedges_per_hex_cell] = {};
 
-        const ScalarT grad_r = grad_forward_map_rad( r_1, r_2 );
+        // const ScalarT grad_r = grad_forward_map_rad( r_1, r_2 );
 
         for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
         {
