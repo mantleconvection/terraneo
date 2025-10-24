@@ -340,6 +340,9 @@ void copy_from_buffer_rotate_and_reduce(
     const auto size_y = data.extent( 2 );
     const auto size_r = data.extent( 3 );
 
+    const auto boundary_direction_0 = std::get< 0 >( boundary_directions );
+    const auto boundary_direction_1 = std::get< 1 >( boundary_directions );
+
     Kokkos::parallel_for(
         "copy_from_buffer_2D",
         Kokkos::MDRangePolicy( { 0, 0, 0 }, { buffer.extent( 0 ), buffer.extent( 1 ), buffer.extent( 2 ) } ),
@@ -351,19 +354,19 @@ void copy_from_buffer_rotate_and_reduce(
             if ( boundary_position_x != grid::BoundaryPosition::PV )
             {
                 x = detail::idx( 0, size_x, boundary_position_x, grid::BoundaryDirection::FORWARD );
-                y = detail::idx( i, size_y, boundary_position_y, std::get< 0 >( boundary_directions ) );
-                r = detail::idx( j, size_r, boundary_position_r, std::get< 1 >( boundary_directions ) );
+                y = detail::idx( i, size_y, boundary_position_y, boundary_direction_0 );
+                r = detail::idx( j, size_r, boundary_position_r, boundary_direction_1 );
             }
             else if ( boundary_position_y != grid::BoundaryPosition::PV )
             {
-                x = detail::idx( i, size_x, boundary_position_x, std::get< 0 >( boundary_directions ) );
+                x = detail::idx( i, size_x, boundary_position_x, boundary_direction_0 );
                 y = detail::idx( 0, size_y, boundary_position_y, grid::BoundaryDirection::FORWARD );
-                r = detail::idx( j, size_r, boundary_position_r, std::get< 1 >( boundary_directions ) );
+                r = detail::idx( j, size_r, boundary_position_r, boundary_direction_1 );
             }
             else
             {
-                x = detail::idx( i, size_x, boundary_position_x, std::get< 0 >( boundary_directions ) );
-                y = detail::idx( j, size_y, boundary_position_y, std::get< 1 >( boundary_directions ) );
+                x = detail::idx( i, size_x, boundary_position_x, boundary_direction_0 );
+                y = detail::idx( j, size_y, boundary_position_y, boundary_direction_1 );
                 r = detail::idx( 0, size_r, boundary_position_r, grid::BoundaryDirection::FORWARD );
             }
 
