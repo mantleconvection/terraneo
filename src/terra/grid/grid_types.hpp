@@ -39,9 +39,8 @@ using Grid3DDataVec = Kokkos::View< ScalarType*** [VecDim], Layout >;
 template < typename ScalarType, int VecDim >
 using Grid4DDataVec = Kokkos::View< ScalarType**** [VecDim], Layout >;
 
-template < typename ScalarType >
-using Grid4DDataLMatrices = Kokkos::View< dense::Mat< ScalarType, 6, 6 >****[2], Layout >;
-
+template < typename ScalarType, int Rows, int Cols, int NumMatrices >
+using Grid4DDataMatrices = Kokkos::View< dense::Mat< ScalarType, Rows, Cols >****[NumMatrices], Layout >;
 
 template < typename GridDataType >
 constexpr int grid_data_vec_dim()

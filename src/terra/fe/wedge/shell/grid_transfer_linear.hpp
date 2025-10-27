@@ -9,7 +9,7 @@ namespace terra::fe::wedge::shell {
 ///
 /// @note See overload of this function for details.
 ///
-/// This covers the (simpler) case that the fine node index and the corresponding coarse grid nodes are aligned.
+/// This covers the (simpler) case that the fine node index and the corresponding coarse grid nodes are radially aligned.
 template < typename ScalarType >
 KOKKOS_INLINE_FUNCTION constexpr dense::Vec< ScalarType, 2 > prolongation_linear_weights(
     const dense::Vec< int, 4 >&                 idx_fine,

@@ -21,13 +21,14 @@ class LaplaceSimple
     using SrcVectorType = linalg::VectorQ1Scalar< ScalarT >;
     using DstVectorType = linalg::VectorQ1Scalar< ScalarT >;
     using ScalarType    = ScalarT;
+    using Grid4DDataLocalMatrices = terra::grid::Grid4DDataMatrices<ScalarType, 6, 6, 2>;
 
   private:
     bool storeLMatrices_ =
         false; // set to let apply_impl() know, that it should store the local matrices after assembling them
     bool applyStoredLMatrices_ =
         false; // set to make apply_impl() load and use the stored LMatrices for the operator application
-    terra::grid::Grid4DDataLMatrices< ScalarType > LMatrices_;
+    Grid4DDataLocalMatrices LMatrices_;
 
     grid::shell::DistributedDomain domain_;
 
@@ -68,21 +69,26 @@ class LaplaceSimple
     , recv_buffers_( domain )
     {}
 
-    // allocates memory for the local matrices
-    // calls kernel with storeLMatrices_ = true to assemble and store the local matrices
-    // sets applyStoredLMatrices_, such that future applies use the stored local matrices
+     /// @brief Setter/Getter for app applyStoredLMatrices_: usage of stored local matrices during apply
+    void setApplyStoredLMatrices( bool v ) { applyStoredLMatrices_ = v; }
+
+    /// @brief
+    /// allocates memory for the local matrices
+    /// calls kernel with storeLMatrices_ = true to assemble and store the local matrices
+    /// sets applyStoredLMatrices_, such that future applies use the stored local matrices
     void storeLMatrices()
     {
         storeLMatrices_ = true;
         if ( LMatrices_.data() == nullptr )
         {
-            LMatrices_ = terra::grid::Grid4DDataLMatrices< ScalarType >(
+            LMatrices_ = Grid4DDataLocalMatrices(
                 "LaplaceSimple::LMatrices",
                 domain_.subdomains().size(),
                 domain_.domain_info().subdomain_num_nodes_per_side_laterally(),
                 domain_.domain_info().subdomain_num_nodes_per_side_laterally(),
                 domain_.domain_info().subdomain_num_nodes_radially() );
-            Kokkos::parallel_for( "matvec", grid::shell::local_domain_md_range_policy_cells( domain_ ), *this );
+            Kokkos::parallel_for( "matvec", grid::shell::local_domain_md_range_policy_cells( domain_ ), *this );    
+            Kokkos::fence();
         }
         storeLMatrices_       = false;
         applyStoredLMatrices_ = true;
