@@ -7,4 +7,5 @@ target_sources(terra
         vector_q1isoq2_q1.hpp)
 
 add_subdirectory(solvers)
+add_subdirectory(trafo)
 add_subdirectory(util)

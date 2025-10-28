@@ -394,6 +394,32 @@ ScalarType max_abs_entry( const grid::Grid4DDataVec< ScalarType, VecDim >& x )
     return max_mag;
 }
 
+template < typename ScalarType, util::FlagLike FlagType >
+ScalarType max_abs_entry(
+    const grid::Grid4DDataScalar< ScalarType >& x,
+    const grid::Grid4DDataScalar< FlagType >&   mask,
+    const FlagType&                             mask_value )
+{
+    ScalarType max_mag = 0.0;
+    Kokkos::parallel_reduce(
+        "max_abs_entry",
+        Kokkos::MDRangePolicy( { 0, 0, 0, 0 }, { x.extent( 0 ), x.extent( 1 ), x.extent( 2 ), x.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k, ScalarType& local_max ) {
+            if ( util::has_flag( mask( local_subdomain, i, j, k ), mask_value ) )
+            {
+                ScalarType val = Kokkos::abs( x( local_subdomain, i, j, k ) );
+                local_max      = Kokkos::max( local_max, val );
+            }
+        },
+        Kokkos::Max< ScalarType >( max_mag ) );
+
+    Kokkos::fence();
+
+    MPI_Allreduce( MPI_IN_PLACE, &max_mag, 1, mpi::mpi_datatype< ScalarType >(), MPI_MAX, MPI_COMM_WORLD );
+
+    return max_mag;
+}
+
 template < typename ScalarType, int VecDim >
 ScalarType max_vector_magnitude( const grid::Grid4DDataVec< ScalarType, VecDim >& x )
 {
@@ -417,6 +443,84 @@ ScalarType max_vector_magnitude( const grid::Grid4DDataVec< ScalarType, VecDim >
     MPI_Allreduce( MPI_IN_PLACE, &max_mag, 1, mpi::mpi_datatype< ScalarType >(), MPI_MAX, MPI_COMM_WORLD );
 
     return max_mag;
+}
+
+template < typename ScalarType, int VecDim >
+void vector_magnitude(
+    grid::Grid4DDataScalar< ScalarType >&            magnitude_out,
+    const grid::Grid4DDataVec< ScalarType, VecDim >& vectorial_data_in )
+{
+    Kokkos::parallel_for(
+        "vector_magnitude",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0 },
+            { vectorial_data_in.extent( 0 ),
+              vectorial_data_in.extent( 1 ),
+              vectorial_data_in.extent( 2 ),
+              vectorial_data_in.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
+            ScalarType val = 0;
+            for ( int d = 0; d < VecDim; ++d )
+            {
+                val +=
+                    vectorial_data_in( local_subdomain, i, j, k, d ) * vectorial_data_in( local_subdomain, i, j, k, d );
+            }
+            magnitude_out( local_subdomain, i, j, k ) = Kokkos::sqrt( val );
+        } );
+
+    Kokkos::fence();
+}
+
+template < typename ScalarType, int VecDim >
+void extract_vector_component(
+    grid::Grid4DDataScalar< ScalarType >&            component_out,
+    const grid::Grid4DDataVec< ScalarType, VecDim >& vectorial_data_in,
+    const int                                        component )
+{
+    if ( component < 0 || component >= VecDim )
+    {
+        Kokkos::abort( "Vector component invalid." );
+    }
+
+    Kokkos::parallel_for(
+        "extract_vector_component",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0 },
+            { vectorial_data_in.extent( 0 ),
+              vectorial_data_in.extent( 1 ),
+              vectorial_data_in.extent( 2 ),
+              vectorial_data_in.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
+            component_out( local_subdomain, i, j, k ) = vectorial_data_in( local_subdomain, i, j, k, component );
+        } );
+
+    Kokkos::fence();
+}
+
+template < typename ScalarType, int VecDim >
+void set_vector_component(
+    grid::Grid4DDataVec< ScalarType, VecDim >& vectorial_data,
+    const int                                  component,
+    const ScalarType                           constant )
+{
+    if ( component < 0 || component >= VecDim )
+    {
+        Kokkos::abort( "Vector component invalid." );
+    }
+
+    Kokkos::parallel_for(
+        "set_vector_component",
+        Kokkos::MDRangePolicy(
+            { 0, 0, 0, 0 },
+            { vectorial_data.extent( 0 ),
+              vectorial_data.extent( 1 ),
+              vectorial_data.extent( 2 ),
+              vectorial_data.extent( 3 ) } ),
+        KOKKOS_LAMBDA( int local_subdomain, int i, int j, int k ) {
+            vectorial_data( local_subdomain, i, j, k, component ) = constant;
+        } );
+
+    Kokkos::fence();
 }
 
 template < typename ScalarType >

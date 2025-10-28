@@ -15,6 +15,24 @@ struct Mat
     static_assert( Rows > 0 && Cols > 0, "Matrix dimensions must be positive" );
 
     KOKKOS_INLINE_FUNCTION
+    constexpr static Mat
+        from_row_vecs( const Vec< T, Cols >& row0, const Vec< T, Cols >& row1, const Vec< T, Cols >& row2 )
+    {
+        static_assert( Rows == 3 && Cols == 3, "This constructor is only for 3x3 matrices" );
+        Mat mat;
+        mat.data[0][0] = row0( 0 );
+        mat.data[0][1] = row0( 1 );
+        mat.data[0][2] = row0( 2 );
+        mat.data[1][0] = row1( 0 );
+        mat.data[1][1] = row1( 1 );
+        mat.data[1][2] = row1( 2 );
+        mat.data[2][0] = row2( 0 );
+        mat.data[2][1] = row2( 1 );
+        mat.data[2][2] = row2( 2 );
+        return mat;
+    }
+
+    KOKKOS_INLINE_FUNCTION
     constexpr static Mat from_col_vecs( const Vec< T, Rows >& col0, const Vec< T, Rows >& col1 )
     {
         static_assert( Rows == 2 && Cols == 2, "This constructor is only for 2x2 matrices" );
@@ -45,13 +63,12 @@ struct Mat
     }
 
     KOKKOS_INLINE_FUNCTION
-    constexpr static Mat
-        from_single_col_vec( const Vec< T, Cols >& col, const int d )
+    constexpr static Mat from_single_col_vec( const Vec< T, Cols >& col, const int d )
     {
         static_assert( Rows == 3 && Cols == 3, "This constructor is only for 3x3 matrices" );
-        assert( d < 3);
+        assert( d < 3 );
         Mat mat;
-        mat.fill(0);
+        mat.fill( 0 );
         mat.data[0][d] = col( 0 );
         mat.data[1][d] = col( 1 );
         mat.data[2][d] = col( 2 );
@@ -165,7 +182,6 @@ struct Mat
         }
         return *this;
     }
-
 
     KOKKOS_INLINE_FUNCTION
     constexpr Mat< T, Cols, Rows > transposed() const

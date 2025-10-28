@@ -45,6 +45,16 @@ struct Vec
     }
 
     KOKKOS_INLINE_FUNCTION
+    constexpr Vec cross( const Vec& other ) const
+    {
+        static_assert( N == 3 );
+        return {
+            data[1] * other( 2 ) - data[2] * other( 1 ),
+            data[2] * other( 0 ) - data[0] * other( 2 ),
+            data[0] * other( 1 ) - data[1] * other( 0 ) };
+    }
+
+    KOKKOS_INLINE_FUNCTION
     constexpr Vec operator+( const Vec& rhs ) const
     {
         Vec out;

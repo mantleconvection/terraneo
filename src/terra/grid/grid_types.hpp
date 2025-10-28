@@ -270,7 +270,7 @@ constexpr std::array all_boundary_faces = {
 };
 
 // String conversion functions
-std::string to_string( BoundaryVertex v )
+inline std::string to_string( BoundaryVertex v )
 {
     switch ( v )
     {
@@ -295,7 +295,7 @@ std::string to_string( BoundaryVertex v )
     }
 }
 
-std::string to_string( BoundaryEdge e )
+inline std::string to_string( BoundaryEdge e )
 {
     switch ( e )
     {
@@ -328,7 +328,7 @@ std::string to_string( BoundaryEdge e )
     }
 }
 
-std::string to_string( BoundaryFace f )
+inline std::string to_string( BoundaryFace f )
 {
     switch ( f )
     {
