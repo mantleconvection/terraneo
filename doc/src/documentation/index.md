@@ -146,6 +146,7 @@ terraneox/
 ## Documentation / cleanup / refactoring
 
 - [ ] Github page
+- [ ] Licensing (GPLv3 since we are including HyTeG/TN code)
 - [x] Doxygen
 - [ ] Doxygen page
 - [x] move mask stuff that generalizes away from shell namespace

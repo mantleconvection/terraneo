@@ -9,4 +9,5 @@ function(add_terra_tool name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+add_terra_tool(visualize_spherical_harmonics)
 add_terra_tool(visualize_thick_spherical_shell_mesh)
