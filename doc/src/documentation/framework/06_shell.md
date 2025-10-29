@@ -36,8 +36,16 @@ and pieced together recovers the spherical shell:
 Indexing in radial direction always goes from the inner boundary to the outer boundary.
 Note that the extrusion in radial direction is not visible from the net.
 
-Each diamond can (optionally) be subdivided in lateral and radial direction. The radial refinement is straightforward.
-After (uniform) lateral refinement, each subdomain can be associated with a globally unique identifying tuple
+#### Local subdomains
+
+Each diamond can (optionally) be subdivided in lateral and radial direction. 
+Below, two angles of an exploded diamond (diamond ID 0, one lateral and one radial subdomain refinement level) are shown:
+
+\image html figures/diamond_subdomains_explosion_0.png
+
+\image html figures/diamond_subdomains_explosion_1.png
+
+After radial and lateral refinement of the diamonds, each subdomain can be associated with a globally unique identifying tuple
 
 ``` 
 subdomain_id = (diamond_id, subdomain_x, subdomain_y, subdomain_r)
@@ -59,8 +67,6 @@ For more details refer to the documentation of \ref terra::grid::shell::DomainIn
 
 \note You typically do not construct the \ref terra::grid::shell::DomainInfo class yourself. Instead, you use the
 \ref terra::grid::shell::DistributedDomain class.
-
-#### Local subdomains
 
 Subdomains on the same MPI process are sorted by their global `subdomain_id` (it is sortable and globally unique)
 and continuously assigned to an integer `local_subdomain_id` that ranges from 0 to the number of process-local
