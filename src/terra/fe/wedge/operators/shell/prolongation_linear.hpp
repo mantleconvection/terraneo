@@ -156,17 +156,16 @@ class ProlongationLinear
     KOKKOS_INLINE_FUNCTION void
         operator()( const int local_subdomain_id, const int x_idx, const int y_idx, const int r_idx ) const
     {
-        dense::Vec< int, 3 > fine_hex_shifts[8] =
-            {
-                { 0, 0, 0 },
-                { 1, 0, 0 },
-                { 0, 1, 0 },
-                { 1, 1, 0 },
-                { 0, 0, 1 },
-                { 1, 0, 1 },
-                { 0, 1, 1 },
-                { 1, 1, 1 },
-            };
+        dense::Vec< int, 3 > fine_hex_shifts[8] = {
+            { 0, 0, 0 },
+            { 1, 0, 0 },
+            { 0, 1, 0 },
+            { 1, 1, 0 },
+            { 0, 0, 1 },
+            { 1, 0, 1 },
+            { 0, 1, 1 },
+            { 1, 1, 1 },
+        };
 
         /*if ( x_idx % 2 == 0 && y_idx % 2 == 0 && r_idx % 2 == 0 )
             {
@@ -251,8 +250,7 @@ class ProlongationLinear
         else
         {
         */
-        dense::Vec< int, 3 >
-                             coarse_hex_idx      = { x_idx, y_idx, r_idx };
+        dense::Vec< int, 3 > coarse_hex_idx      = { x_idx, y_idx, r_idx };
         dense::Vec< int, 3 > coarse_hex_idx_fine = { 2 * x_idx, 2 * y_idx, 2 * r_idx };
         dense::Vec< int, 3 > wedge_local_vertex_indices_fine[6];
         dense::Vec< int, 3 > wedge_local_vertex_indices_coarse[6];
@@ -281,7 +279,7 @@ class ProlongationLinear
                         // fine dof is on coarse dof
                         if ( fine_dof_idx( 0 ) % 2 == 0 && fine_dof_idx( 1 ) % 2 == 0 && fine_dof_idx( 2 ) % 2 == 0 )
                         {
-                            // local index of destination fine DoF == local index of source coarse DoF 
+                            // local index of destination fine DoF == local index of source coarse DoF
                             P( fine_dof_lidx, fine_dof_lidx ) = 1.0;
                             continue;
                         }
@@ -337,10 +335,10 @@ class ProlongationLinear
                         // for the two botting coarse DoFs
                         int x0_idx_coarse = -1;
                         int x1_idx_coarse = -1;
-                        int y0_idx_coarse      = -1;
-                        int y1_idx_coarse      = -1;
+                        int y0_idx_coarse = -1;
+                        int y1_idx_coarse = -1;
 
-                        // local indices of the 4 coarse DoFs in the plane 
+                        // local indices of the 4 coarse DoFs in the plane
                         int coarse_lindices[4] = { -1 };
 
                         if ( fine_dof_idx( 0 ) % 2 == 0 )
@@ -349,14 +347,13 @@ class ProlongationLinear
                             x0_idx_coarse = fine_dof_idx( 0 ) / 2;
                             x1_idx_coarse = fine_dof_idx( 0 ) / 2;
 
-                            y0_idx_coarse   = fine_dof_idx( 1 ) / 2;
-                            y1_idx_coarse   = fine_dof_idx( 1 ) / 2 + 1;
+                            y0_idx_coarse = fine_dof_idx( 1 ) / 2;
+                            y1_idx_coarse = fine_dof_idx( 1 ) / 2 + 1;
 
                             coarse_lindices[0] = 0;
                             coarse_lindices[1] = 2;
                             coarse_lindices[2] = 4;
                             coarse_lindices[3] = 5;
-                            
                         }
                         else if ( fine_dof_idx( 1 ) % 2 == 0 )
                         {
@@ -364,8 +361,8 @@ class ProlongationLinear
                             x0_idx_coarse = fine_dof_idx( 0 ) / 2;
                             x1_idx_coarse = fine_dof_idx( 0 ) / 2 + 1;
 
-                            y0_idx_coarse   = fine_dof_idx( 1 ) / 2;
-                            y1_idx_coarse   = fine_dof_idx( 1 ) / 2;
+                            y0_idx_coarse      = fine_dof_idx( 1 ) / 2;
+                            y1_idx_coarse      = fine_dof_idx( 1 ) / 2;
                             coarse_lindices[0] = 0;
                             coarse_lindices[1] = 1;
                             coarse_lindices[2] = 3;
@@ -377,8 +374,8 @@ class ProlongationLinear
                             x0_idx_coarse = fine_dof_idx( 0 ) / 2 + 1;
                             x1_idx_coarse = fine_dof_idx( 0 ) / 2;
 
-                            y0_idx_coarse   = fine_dof_idx( 1 ) / 2;
-                            y1_idx_coarse   = fine_dof_idx( 1 ) / 2 + 1;
+                            y0_idx_coarse      = fine_dof_idx( 1 ) / 2;
+                            y1_idx_coarse      = fine_dof_idx( 1 ) / 2 + 1;
                             coarse_lindices[0] = 1;
                             coarse_lindices[1] = 2;
                             coarse_lindices[2] = 5;
@@ -409,41 +406,66 @@ class ProlongationLinear
                 if ( storeLMatrices_ )
                 {
                     // write LMatrix for the current local fine wedge to mem
-                    LMatrices_(
-                        local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ), fine_hex_idx( 2 ), wedge ) = P;
+                    LMatrices_( local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ), fine_hex_idx( 2 ), wedge ) =
+                        P;
                 }
                 else
                 {
                     // apply local interpolation to local DoFs
                     dense::Vec< ScalarT, 6 > src;
-                    src( 0 ) = src_( local_subdomain_id, x_idx, y_idx, r_idx );
-                    src( 1 ) = src_( local_subdomain_id, x_idx + 1, y_idx, r_idx );
-                    src( 2 ) = src_( local_subdomain_id, x_idx, y_idx + 1, r_idx );
-                    src( 3 ) = src_( local_subdomain_id, x_idx, y_idx, r_idx + 1 );
-                    src( 4 ) = src_( local_subdomain_id, x_idx + 1, y_idx, r_idx + 1 );
-                    src( 5 ) = src_( local_subdomain_id, x_idx, y_idx + 1, r_idx + 1 );
-
                     dense::Vec< ScalarT, 6 > dst;
+                    if ( wedge == 0 )
+                    {
+                        src( 0 ) = src_( local_subdomain_id, x_idx, y_idx, r_idx );
+                        src( 1 ) = src_( local_subdomain_id, x_idx + 1, y_idx, r_idx );
+                        src( 2 ) = src_( local_subdomain_id, x_idx, y_idx + 1, r_idx );
+                        src( 3 ) = src_( local_subdomain_id, x_idx, y_idx, r_idx + 1 );
+                        src( 4 ) = src_( local_subdomain_id, x_idx + 1, y_idx, r_idx + 1 );
+                        src( 5 ) = src_( local_subdomain_id, x_idx, y_idx + 1, r_idx + 1 );
 
-                    dst = P * src;
+                        dst = P * src;
 
-                    // since the local interpolations are fully assembled, this is not an additive process but we assign
-                    // there are redundant assigns from multiple elements connecting two DoFs
-                    // the connection values should be the same for both matrices
-                    // in practice, the interpolation values should not be stored except to compute Galerkin coarse-grid operators
-                    // afterwards, these matrices should be erased from memory
-                    dst_( local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ), fine_hex_idx( 2 ) ) =
-                        dst( 0 );
-                    dst_( local_subdomain_id, fine_hex_idx( 0 ) + 1, fine_hex_idx( 1 ), fine_hex_idx( 2 ) ) =
-                        dst( 1 );
-                    dst_( local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ) + 1, fine_hex_idx( 2 ) ) =
-                        dst( 2 );
-                    dst_( local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ), fine_hex_idx( 2 ) + 1 ) =
-                        dst( 3 );
-                    dst_( local_subdomain_id, fine_hex_idx( 0 ) + 1, fine_hex_idx( 1 ), fine_hex_idx( 2 ) + 1 ) =
-                        dst( 4 );
-                    dst_( local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ) + 1, fine_hex_idx( 2 ) + 1 ) =
-                        dst( 5 );
+                        // since the local interpolations are fully assembled, this is not an additive process but we assign
+                        // there are redundant assigns from multiple elements connecting two DoFs
+                        // the connection values should be the same for both matrices
+                        // in practice, the interpolation values should not be stored except to compute Galerkin coarse-grid operators
+                        // afterwards, these matrices should be erased from memory
+                        dst_( local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ), fine_hex_idx( 2 ) ) = dst( 0 );
+                        dst_( local_subdomain_id, fine_hex_idx( 0 ) + 1, fine_hex_idx( 1 ), fine_hex_idx( 2 ) ) =
+                            dst( 1 );
+                        dst_( local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ) + 1, fine_hex_idx( 2 ) ) =
+                            dst( 2 );
+                        dst_( local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ), fine_hex_idx( 2 ) + 1 ) =
+                            dst( 3 );
+                        dst_( local_subdomain_id, fine_hex_idx( 0 ) + 1, fine_hex_idx( 1 ), fine_hex_idx( 2 ) + 1 ) =
+                            dst( 4 );
+                        dst_( local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ) + 1, fine_hex_idx( 2 ) + 1 ) =
+                            dst( 5 );
+                    }
+                    else
+                    {
+                        src( 0 ) = src_( local_subdomain_id, x_idx + 1, y_idx + 1, r_idx );
+                        src( 1 ) = src_( local_subdomain_id, x_idx + 1, y_idx, r_idx );
+                        src( 2 ) = src_( local_subdomain_id, x_idx, y_idx + 1, r_idx );
+                        src( 3 ) = src_( local_subdomain_id, x_idx + 1, y_idx + 1, r_idx + 1 );
+                        src( 4 ) = src_( local_subdomain_id, x_idx + 1, y_idx, r_idx + 1 );
+                        src( 5 ) = src_( local_subdomain_id, x_idx, y_idx + 1, r_idx + 1 );
+
+                        dst = P * src;
+                        dst_( local_subdomain_id, fine_hex_idx( 0 ) + 1, fine_hex_idx( 1 ) + 1, fine_hex_idx( 2 ) ) =
+                            dst( 0 );
+                        dst_( local_subdomain_id, fine_hex_idx( 0 ) + 1, fine_hex_idx( 1 ), fine_hex_idx( 2 ) ) =
+                            dst( 1 );
+                        dst_( local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ) + 1, fine_hex_idx( 2 ) ) =
+                            dst( 2 );
+                        dst_(
+                            local_subdomain_id, fine_hex_idx( 0 ) + 1, fine_hex_idx( 1 ) + 1, fine_hex_idx( 2 ) + 1 ) =
+                            dst( 3 );
+                        dst_( local_subdomain_id, fine_hex_idx( 0 ) + 1, fine_hex_idx( 1 ), fine_hex_idx( 2 ) + 1 ) =
+                            dst( 4 );
+                        dst_( local_subdomain_id, fine_hex_idx( 0 ), fine_hex_idx( 1 ) + 1, fine_hex_idx( 2 ) + 1 ) =
+                            dst( 5 );
+                    }
                 }
             }
         }
