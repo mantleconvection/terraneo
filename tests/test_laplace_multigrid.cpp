@@ -217,7 +217,8 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
                     subdomain_shell_coords[level + 1],
                     subdomain_radii[level + 1],
                     linalg::OperatorApplyMode::Add );
-                R.emplace_back( domains[level], subdomain_shell_coords[level + 1], subdomain_radii[level + 1] );
+                //R.emplace_back( domains[level] );
+                 R.emplace_back( domains[level], subdomain_shell_coords[level + 1], subdomain_radii[level + 1] );
             }
             else if constexpr ( std::is_same_v<
                                     Prolongation,
@@ -366,7 +367,7 @@ int run_test()
             std::cout << "order = " << order << std::endl;
             if ( order < 3.4 )
             {
-           //     return EXIT_FAILURE;
+                //     return EXIT_FAILURE;
             }
 
             table->add_row( { { "level", level }, { "order", prev_l2_error / l2_error } } );

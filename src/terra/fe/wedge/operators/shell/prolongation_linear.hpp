@@ -464,8 +464,6 @@ class ProlongationLinear
                             // the connection values should be the same for both matrices
                             // in practice, the interpolation values should not be stored except to compute Galerkin coarse-grid operators
                             // afterwards, these matrices should be erased from memory
-
-                            // TODO: atomic assign atomic (kokkos atomic store)
                             dst_( local_subdomain_id, fine_hex_idx( 1 ), fine_hex_idx( 2 ), fine_hex_idx( 3 ) ) =
                                 dst( 0 );
                             dst_( local_subdomain_id, fine_hex_idx( 1 ) + 1, fine_hex_idx( 2 ), fine_hex_idx( 3 ) ) =
