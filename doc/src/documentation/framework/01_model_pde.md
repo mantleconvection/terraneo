@@ -1,3 +1,3 @@
-## Model / Partial differential equations {#model-pde}
+# Model / Partial differential equations {#model-pde}
 
 🏗️

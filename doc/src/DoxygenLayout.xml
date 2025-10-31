@@ -13,10 +13,9 @@
 
     <tab type="usergroup" url="@ref framework-documentation" visible="yes" title="Framework Documentation" >
       <tab type="user" url="@ref model-pde" visible="yes" title="Model and PDE" intro=""/>
-      <tab type="user" url="@ref grid-subdomains" visible="yes" title="Grid Structure I (Subdomains)" intro=""/>
+      <tab type="user" url="@ref grid-subdomains" visible="yes" title="Grids" intro=""/>
       <tab type="user" url="@ref finite-elements" visible="yes" title="Finite Elements" intro=""/>
       <tab type="user" url="@ref linear-algebra" visible="yes" title="Linear Algebra" intro=""/>
-      <tab type="user" url="@ref grid-kokkos" visible="yes" title="Grid Structure II (Kokkos)" intro=""/>
       <tab type="user" url="@ref shell" visible="yes" title="Spherical Shell Mesh" intro=""/>
       <tab type="user" url="@ref parallelization" visible="yes" title="Parallelization" intro=""/>
       <tab type="user" url="@ref communication" visible="yes" title="Communication" intro=""/>
