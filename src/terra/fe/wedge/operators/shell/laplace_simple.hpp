@@ -77,10 +77,12 @@ class LaplaceSimple
 
     /// @brief Getter for grid member
     grid::Grid3DDataVec< ScalarT, 3 >& get_grid() { return grid_; }
-    KOKKOS_INLINE_FUNCTION
 
+    /// @brief S/Getter for diagonal member
+    void set_diagonal( bool v ) { diagonal_ = v; }
 
     /// @brief Retrives the local matrix stored in the operator
+    KOKKOS_INLINE_FUNCTION
     dense::Mat< ScalarT, 6, 6 >& get_lmatrix(
         const int local_subdomain_id,
         const int x_cell,
@@ -89,7 +91,7 @@ class LaplaceSimple
         const int wedge )
     {
         assert( lmatrices_.data() != nullptr );
-         
+
         return lmatrices_( local_subdomain_id, x_cell, y_cell, r_cell, wedge );
     }
 
@@ -111,7 +113,8 @@ class LaplaceSimple
                 domain_.domain_info().subdomain_num_nodes_per_side_laterally() - 1,
                 domain_.domain_info().subdomain_num_nodes_per_side_laterally() - 1,
                 domain_.domain_info().subdomain_num_nodes_radially() - 1 );
-            Kokkos::parallel_for( "assemble_store_lmatrices", grid::shell::local_domain_md_range_policy_cells( domain_ ), *this );
+            Kokkos::parallel_for(
+                "assemble_store_lmatrices", grid::shell::local_domain_md_range_policy_cells( domain_ ), *this );
             Kokkos::fence();
         }
         storeLMatrices_       = false;
@@ -241,18 +244,18 @@ class LaplaceSimple
                     A[wedge].hadamard_product( boundary_mask );
                 }
             }
-
-            if ( diagonal_ )
-            {
-                A[0] = A[0].diagonal();
-                A[1] = A[1].diagonal();
-            }
         }
         else
         {
             // load LMatrix for both local wedges
             A[0] = lmatrices_( local_subdomain_id, x_cell, y_cell, r_cell, 0 );
             A[1] = lmatrices_( local_subdomain_id, x_cell, y_cell, r_cell, 1 );
+        }
+
+        if ( diagonal_ )
+        {
+            A[0] = A[0].diagonal();
+            A[1] = A[1].diagonal();
         }
 
         if ( storeLMatrices_ )

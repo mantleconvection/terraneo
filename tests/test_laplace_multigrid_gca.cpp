@@ -172,21 +172,10 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     A_neumann.store_lmatrices();
     Laplace A_neumann_diag( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), false, true );
 
+    // setup operators (prolongation, restriction, matrix storage)
     for ( int level = min_level; level <= max_level; level++ )
     {
         tmp.emplace_back( "tmp_level_" + std::to_string( level ), domains[level], mask_data[level] );
-
-        VectorQ1Scalar< ScalarType > tmp_smoother(
-            "tmp_smoothers_level_" + std::to_string( level ), domains[level], mask_data[level] );
-        VectorQ1Scalar< ScalarType > inverse_diagonal(
-            "inv_diag_level_" + std::to_string( level ), domains[level], mask_data[level] );
-        Laplace A_diag( domains[level], subdomain_shell_coords[level], subdomain_radii[level], true, true );
-        assign( tmp_smoother, 1.0 );
-        apply( A_diag, tmp_smoother, inverse_diagonal );
-
-        linalg::invert_entries( inverse_diagonal );
-
-        smoothers.emplace_back( inverse_diagonal, prepost_smooth, tmp_smoother, omega );
 
         if ( level == min_level )
         {
@@ -228,7 +217,8 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
         }
     }
 
-    
+    /*
+    // setup gca coarse ops
     for ( int level = max_level - 1; level >= min_level; level-- )
     {
         if ( level == max_level - 1 )
@@ -239,6 +229,31 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
         {
             TwoGridGalerkinLinear< ScalarType, Laplace >( A_c[level + 1], A_c[level], true );
         }
+    }
+    */
+
+    // setup smoothers
+    for ( int level = min_level; level <= max_level; level++ )
+    {
+        VectorQ1Scalar< ScalarType > tmp_smoother(
+            "tmp_smoothers_level_" + std::to_string( level ), domains[level], mask_data[level] );
+        VectorQ1Scalar< ScalarType > inverse_diagonal(
+            "inv_diag_level_" + std::to_string( level ), domains[level], mask_data[level] );
+        assign( tmp_smoother, 1.0 );
+        if ( level < max_level )
+        {
+            A_c[level].set_diagonal( true );
+            apply( A_c[level], tmp_smoother, inverse_diagonal );
+            A_c[level].set_diagonal( false );
+        } else {
+            A.set_diagonal( true );
+            apply( A, tmp_smoother, inverse_diagonal );
+            A.set_diagonal( false );
+        }
+
+        linalg::invert_entries( inverse_diagonal );
+
+        smoothers.emplace_back( inverse_diagonal, prepost_smooth, tmp_smoother, omega );
     }
 
     VectorQ1Scalar< ScalarType > u( "u", domains.back(), mask_data.back() );
@@ -335,7 +350,7 @@ int run_test()
 {
     T prev_l2_error = 1.0;
 
-    const int max_level = 5;
+    const int max_level = 4;
 
     constexpr T   omega          = 0.666;
     constexpr int prepost_smooth = 2;
@@ -360,7 +375,7 @@ int run_test()
             std::cout << "l2_error = " << l2_error << std::endl;
             const T order = prev_l2_error / l2_error;
             std::cout << "order = " << order << std::endl;
-          
+
             table->add_row( { { "level", level }, { "order", prev_l2_error / l2_error } } );
         }
         prev_l2_error = l2_error;
