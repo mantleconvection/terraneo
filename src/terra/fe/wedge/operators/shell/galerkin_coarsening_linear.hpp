@@ -24,16 +24,21 @@ class TwoGridGalerkinLinear
     grid::shell::DistributedDomain&    domain_fine_;
     grid::Grid3DDataVec< ScalarT, 3 >& grid_fine_;
     grid::Grid2DDataScalar< ScalarT >& radii_fine_;
+    grid::Grid2DDataScalar< ScalarT >& radii_coarse_;
     Operator&                          fine_op_;
     Operator&                          coarse_op_;
+    bool                               treat_boundary_;
 
   public:
-    explicit TwoGridGalerkinLinear( Operator fine_op, Operator coarse_op )
+    explicit TwoGridGalerkinLinear( Operator fine_op, Operator coarse_op, bool treat_boundary )
     : domain_fine_( fine_op.get_domain() )
     , fine_op_( fine_op )
     , coarse_op_( coarse_op )
     , grid_fine_( fine_op.get_grid() )
     , radii_fine_( fine_op.get_radii() )
+    , radii_coarse_( coarse_op.get_radii() )
+    , treat_boundary_( treat_boundary )
+
     {
         // this probably cant not happen
         if ( coarse_op.get_domain().subdomains().size() != domain_fine_.subdomains().size() )
@@ -260,14 +265,17 @@ class TwoGridGalerkinLinear
                     P( fine_dof_lidx, coarse_dof_lindices[3] ) = weights( 1 );
                 }
 
-                dense::Mat< ScalarT, 6, 6 > A_fine =
-                    fine_op_.get_lmatrix( local_subdomain_id, fine_hex_idx(1), fine_hex_idx(2), fine_hex_idx(3), wedge );
+                dense::Mat< ScalarT, 6, 6 > A_fine = fine_op_.get_lmatrix(
+                    local_subdomain_id, fine_hex_idx( 1 ), fine_hex_idx( 2 ), fine_hex_idx( 3 ), wedge );
+                //std::cout << "A_fine: " << A_fine << std::endl;
+                //std::cout << "P: " << P << std::endl;
+                //std::cout << PAP << std::endl;
 
                 auto PAP = P.transposed() * A_fine * P;
                 //std::cout << PAP << std::endl;
 
                 // correctly add to gca coarsened matrix
-                // depending on the fine hex and wedge, we are located on the coarse 0 or 1 wedge 
+                // depending on the fine hex and wedge, we are located on the coarse 0 or 1 wedge
                 // and need to add to the corresponding coarse matrix
                 if ( ( wedge == 0 && ( fine_hex_lidx == 0 || fine_hex_lidx == 1 || fine_hex_lidx == 2 ||
                                        fine_hex_lidx == 4 || fine_hex_lidx == 5 || fine_hex_lidx == 6 ) ) or
@@ -288,11 +296,50 @@ class TwoGridGalerkinLinear
                 }
             }
         }
-        
+
+        if ( treat_boundary_ )
+        {
+            for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
+            {
+                dense::Mat< ScalarT, 6, 6 > boundary_mask;
+                boundary_mask.fill( 1.0 );
+                if ( r_coarse_idx == 0 )
+                {
+                    // Inner boundary (CMB).
+                    for ( int i = 0; i < 6; i++ )
+                    {
+                        for ( int j = 0; j < 6; j++ )
+                        {
+                            if ( i != j && ( i < 3 || j < 3 ) )
+                            {
+                                boundary_mask( i, j ) = 0.0;
+                            }
+                        }
+                    }
+                }
+
+                if ( r_coarse_idx + 1 == radii_coarse_.extent( 1 ) - 1 )
+                {
+                    // Outer boundary (surface).
+                    for ( int i = 0; i < 6; i++ )
+                    {
+                        for ( int j = 0; j < 6; j++ )
+                        {
+                            if ( i != j && ( i >= 3 || j >= 3 ) )
+                            {
+                                boundary_mask( i, j ) = 0.0;
+                            }
+                        }
+                    }
+                }
+
+                A_coarse[wedge].hadamard_product( boundary_mask );
+            }
+        }
+
         // store coarse matrices
         coarse_op_.get_lmatrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 0 ) = A_coarse[0];
         coarse_op_.get_lmatrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 1 ) = A_coarse[1];
-                
     }
 };
 } // namespace terra::fe::wedge::operators::shell
