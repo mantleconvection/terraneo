@@ -167,10 +167,13 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     }
 
     Laplace A( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), true, false );
-    A.store_lmatrices();
+    //A.store_lmatrices();
+    //A.set_single_quadpoint(true);
     Laplace A_neumann( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), false, false );
     A_neumann.store_lmatrices();
+   // A_neumann.set_single_quadpoint(true);
     Laplace A_neumann_diag( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), false, true );
+   // A_neumann_diag.set_single_quadpoint(true);
 
     // setup operators (prolongation, restriction, matrix storage)
     for ( int level = min_level; level <= max_level; level++ )
@@ -214,11 +217,14 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
             {
                 throw std::runtime_error( "Unknown prolongation type." );
             }
+
+            
         }
     }
 
-    /*
+    
     // setup gca coarse ops
+    /*
     for ( int level = max_level - 1; level >= min_level; level-- )
     {
         if ( level == max_level - 1 )
