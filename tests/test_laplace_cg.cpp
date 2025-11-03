@@ -3,7 +3,7 @@
 #include "../src/terra/communication/shell/communication.hpp"
 #include "fe/strong_algebraic_dirichlet_enforcement.hpp"
 #include "fe/wedge/integrands.hpp"
-#include "fe/wedge/operators/shell/laplace.hpp"
+#include "fe/wedge/operators/shell/laplace_simple.hpp"
 #include "linalg/solvers/pcg.hpp"
 #include "linalg/solvers/richardson.hpp"
 #include "terra/dense/mat.hpp"
@@ -133,11 +133,14 @@ double test( int level, const std::shared_ptr< util::Table >& table )
     const auto coords_shell = terra::grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
     const auto coords_radii = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
 
-    using Laplace = fe::wedge::operators::shell::Laplace< ScalarType >;
+    using Laplace = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
 
-    Laplace A( domain, coords_shell, coords_radii, boundary_mask_data, true, false );
-    Laplace A_neumann( domain, coords_shell, coords_radii, boundary_mask_data, false, false );
-    Laplace A_neumann_diag( domain, coords_shell, coords_radii, boundary_mask_data, false, true );
+    Laplace A( domain, coords_shell, coords_radii, true, false );
+    A.set_single_quadpoint( true );
+    Laplace A_neumann( domain, coords_shell, coords_radii, false, false );
+    A_neumann.set_single_quadpoint( true );
+    Laplace A_neumann_diag( domain, coords_shell, coords_radii,  false, true );
+    A_neumann_diag.set_single_quadpoint( true );
 
     using Mass = fe::wedge::operators::shell::Mass< ScalarType >;
 
@@ -241,9 +244,9 @@ int main( int argc, char** argv )
         }
         prev_l2_error = l2_error;
 
-        util::TimerTree::instance().aggregate_mpi();
-        std::cout << util::TimerTree::instance().json() << std::endl;
-        std::cout << util::TimerTree::instance().json_aggregate() << std::endl;
+        // util::TimerTree::instance().aggregate_mpi();
+        // std::cout << util::TimerTree::instance().json() << std::endl;
+        // std::cout << util::TimerTree::instance().json_aggregate() << std::endl;
         util::TimerTree::instance().clear();
     }
 

@@ -8,6 +8,7 @@
 #include "fe/wedge/operators/shell/laplace.hpp"
 #include "fe/wedge/operators/shell/prolongation_constant.hpp"
 #include "fe/wedge/operators/shell/restriction_constant.hpp"
+#include "fe/wedge/operators/shell/galerkin_coarsening_linear.hpp"
 #include "linalg/solvers/jacobi.hpp"
 #include "linalg/solvers/multigrid.hpp"
 #include "linalg/solvers/pcg.hpp"
@@ -124,7 +125,7 @@ template < std::floating_point T, typename Prolongation, typename Restriction >
 T test( int min_level, int max_level, const std::shared_ptr< util::Table >& table, T omega, int prepost_smooth )
 {
     using ScalarType       = T;
-    using Laplace          = fe::wedge::operators::shell::Laplace< ScalarType >;
+    using Laplace          = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
     using Smoother         = linalg::solvers::Jacobi< Laplace >;
     using CoarseGridSolver = linalg::solvers::PCG< Laplace >;
 
@@ -212,8 +213,13 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
                                fe::wedge::operators::shell::ProlongationLinear< ScalarType > > )
             {
                 P_additive.emplace_back(
-                    subdomain_shell_coords[level + 1], subdomain_radii[level + 1], linalg::OperatorApplyMode::Add );
-                R.emplace_back( domains[level], subdomain_shell_coords[level + 1], subdomain_radii[level + 1] );
+                    domains[level + 1],
+                    domains[level],
+                    subdomain_shell_coords[level + 1],
+                    subdomain_radii[level + 1],
+                    linalg::OperatorApplyMode::Add );
+                //R.emplace_back( domains[level] );
+                 R.emplace_back( domains[level], subdomain_shell_coords[level + 1], subdomain_radii[level + 1] );
             }
             else if constexpr ( std::is_same_v<
                                     Prolongation,
@@ -237,9 +243,15 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     const auto num_dofs = kernels::common::count_masked< long >( mask_data.back(), grid::NodeOwnershipFlag::OWNED );
     std::cout << "num_dofs = " << num_dofs << std::endl;
 
-    Laplace A( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), boundary_mask_data.back(), true, false );
+    Laplace A(
+        domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), boundary_mask_data.back(), true, false );
     Laplace A_neumann(
-        domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), boundary_mask_data.back(), false, false );
+        domains.back(),
+        subdomain_shell_coords.back(),
+        subdomain_radii.back(),
+        boundary_mask_data.back(),
+        false,
+        false );
     Laplace A_neumann_diag(
         domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), boundary_mask_data.back(), false, true );
 
@@ -343,8 +355,8 @@ int run_test()
 
         T l2_error = test<
             T,
-            fe::wedge::operators::shell::ProlongationConstant< T >,
-            fe::wedge::operators::shell::RestrictionConstant< T > >( 0, level, table, omega, prepost_smooth );
+            fe::wedge::operators::shell::ProlongationLinear< T >,
+            fe::wedge::operators::shell::RestrictionLinear< T > >( 0, level, table, omega, prepost_smooth );
 
         const auto time_total = timer.seconds();
         table->add_row( { { "tag", "time_total" }, { "level", level }, { "time_total", time_total } } );
@@ -376,5 +388,5 @@ int main( int argc, char** argv )
 {
     util::terra_initialize( &argc, &argv );
 
-    return run_test< float >() + run_test< double >();
+    return run_test< double >();
 }

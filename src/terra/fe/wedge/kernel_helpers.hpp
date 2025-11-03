@@ -608,4 +608,5 @@ constexpr int fine_lateral_wedge_idx( const int x_cell_fine, const int y_cell_fi
     return indices[wedge_idx_fine][y_mod][x_mod];
 }
 
+
 } // namespace terra::fe::wedge

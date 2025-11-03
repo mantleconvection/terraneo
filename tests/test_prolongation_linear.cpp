@@ -14,6 +14,7 @@
 #include "terra/kernels/common/grid_operations.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
 #include "terra/visualization/vtk.hpp"
+#include "terra/visualization/xdmf.hpp"
 #include "util/init.hpp"
 #include "util/table.hpp"
 
@@ -157,7 +158,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     using Prolongation = fe::wedge::operators::shell::ProlongationLinear< ScalarType >;
 
-    Prolongation P( subdomain_shell_coords_fine, subdomain_radii_fine );
+    Prolongation P( domain_fine, domain_coarse, subdomain_shell_coords_fine, subdomain_radii_fine );
 
     // Set up solution data.
     Kokkos::parallel_for(
@@ -180,7 +181,16 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     const auto num_dofs = kernels::common::count_masked< long >( mask_data_fine, grid::NodeOwnershipFlag::OWNED );
 
-    const auto error_norm = linalg::norm_2_scaled( error_fine, 1.0 / num_dofs );
+    const auto error_norm  = linalg::norm_2_scaled( error_fine, 1.0 / num_dofs );
+    const auto u_fine_norm = linalg::norm_2_scaled( u_fine, 1.0 / num_dofs );
+    std::cout << "u_norm (fine level " << level << ") = " << u_fine_norm << std::endl;
+
+    if ( false )
+    {
+        visualization::XDMFOutput xdmf( ".", subdomain_shell_coords_fine, subdomain_radii_fine );
+        xdmf.add( u_fine.grid_data() );
+        xdmf.write();
+    }
 
     return error_norm;
 }
@@ -201,13 +211,13 @@ int main( int argc, char** argv )
 
             if ( error > 1e-12 )
             {
-                throw std::runtime_error( "constants must be prolongated exactly" );
+                  throw std::runtime_error( "constants must be prolongated exactly" );
             }
         }
     }
 
     std::cout << std::endl;
-
+    
     std::cout << "Testing prolongation: linear function" << std::endl;
     {
         for ( int level = 1; level <= 5; ++level )

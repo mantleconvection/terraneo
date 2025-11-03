@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../kokkos/kokkos_wrapper.hpp"
-#include "terra/dense/vec.hpp"
+#include "./vec.hpp"
 
 namespace terra::dense {
 

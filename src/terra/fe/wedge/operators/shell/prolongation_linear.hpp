@@ -5,6 +5,7 @@
 #include "communication/shell/communication.hpp"
 #include "dense/vec.hpp"
 #include "fe/wedge/shell/grid_transfer_linear.hpp"
+#include "grid/grid_types.hpp"
 #include "linalg/operator.hpp"
 #include "linalg/vector.hpp"
 #include "linalg/vector_q1.hpp"
@@ -15,11 +16,19 @@ template < typename ScalarT >
 class ProlongationLinear
 {
   public:
-    using SrcVectorType = linalg::VectorQ1Scalar< double >;
-    using DstVectorType = linalg::VectorQ1Scalar< double >;
-    using ScalarType    = ScalarT;
+    using SrcVectorType           = linalg::VectorQ1Scalar< double >;
+    using DstVectorType           = linalg::VectorQ1Scalar< double >;
+    using ScalarType              = ScalarT;
+    using Grid4DDataLocalMatrices = terra::grid::Grid4DDataMatrices< ScalarType, 6, 6, 2 >;
 
   private:
+    bool storeLMatrices_ =
+        false; // set to let apply_impl() know, that it should store the local matrices after assembling them
+    bool applyStoredLMatrices_ =
+        false; // set to make apply_impl() load and use the stored LMatrices for the operator application
+
+    Grid4DDataLocalMatrices LMatrices_;
+
     grid::Grid3DDataVec< ScalarType, 3 > grid_fine_;
     grid::Grid2DDataScalar< ScalarType > radii_fine_;
 
@@ -40,6 +49,9 @@ class ProlongationLinear
 
     void apply_impl( const SrcVectorType& src, DstVectorType& dst )
     {
+        if ( storeLMatrices_ or applyStoredLMatrices_ )
+            assert( LMatrices_.data() != nullptr );
+
         if ( operator_apply_mode_ == linalg::OperatorApplyMode::Replace )
         {
             assign( dst, 0 );
@@ -92,14 +104,15 @@ class ProlongationLinear
     KOKKOS_INLINE_FUNCTION void
         operator()( const int local_subdomain_id, const int x_fine, const int y_fine, const int r_fine ) const
     {
+        dense::Vec< int, 4 > fine_hex_fine = { local_subdomain_id, x_fine, y_fine, r_fine };
+
         if ( x_fine % 2 == 0 && y_fine % 2 == 0 && r_fine % 2 == 0 )
         {
             const auto x_coarse = x_fine / 2;
             const auto y_coarse = y_fine / 2;
             const auto r_coarse = r_fine / 2;
 
-            dst_( local_subdomain_id, x_fine, y_fine, r_fine ) +=
-                src_( local_subdomain_id, x_coarse, y_coarse, r_coarse );
+            dst_( local_subdomain_id, x_fine, y_fine, r_fine ) += src_( local_subdomain_id, x_coarse, y_coarse, r_coarse );
 
             return;
         }

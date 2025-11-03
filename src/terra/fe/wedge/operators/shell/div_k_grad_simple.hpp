@@ -15,7 +15,7 @@
 namespace terra::fe::wedge::operators::shell {
 
 template < typename ScalarT >
-class LaplaceSimple
+class DivKGradSimple
 {
   public:
     using SrcVectorType           = linalg::VectorQ1Scalar< ScalarT >;
@@ -53,19 +53,23 @@ class LaplaceSimple
     dense::Vec< ScalarT, 3 > quad_points_1x1_[quadrature::quad_felippa_1x1_num_quad_points];
     ScalarT                  quad_weights_1x1_[quadrature::quad_felippa_1x1_num_quad_points];
 
+    grid::Grid4DDataScalar< ScalarType > k_;
+
   public:
-    LaplaceSimple(
-        const grid::shell::DistributedDomain&    domain,
-        const grid::Grid3DDataVec< ScalarT, 3 >& grid,
-        const grid::Grid2DDataScalar< ScalarT >& radii,
-        bool                                     treat_boundary,
-        bool                                     diagonal,
-        linalg::OperatorApplyMode                operator_apply_mode = linalg::OperatorApplyMode::Replace,
-        linalg::OperatorCommunicationMode        operator_communication_mode =
+    DivKGradSimple(
+        const grid::shell::DistributedDomain&       domain,
+        const grid::Grid3DDataVec< ScalarT, 3 >&    grid,
+        const grid::Grid2DDataScalar< ScalarT >&    radii,
+        const grid::Grid4DDataScalar< ScalarType >& k,
+        bool                                        treat_boundary,
+        bool                                        diagonal,
+        linalg::OperatorApplyMode                   operator_apply_mode = linalg::OperatorApplyMode::Replace,
+        linalg::OperatorCommunicationMode           operator_communication_mode =
             linalg::OperatorCommunicationMode::CommunicateAdditively )
     : domain_( domain )
     , grid_( grid )
     , radii_( radii )
+    , k_( k )
     , treat_boundary_( treat_boundary )
     , diagonal_( diagonal )
     , operator_apply_mode_( operator_apply_mode )
@@ -187,6 +191,9 @@ class LaplaceSimple
             int num_quad_points = single_quadpoint_ ? quadrature::quad_felippa_1x1_num_quad_points :
                                                       quadrature::quad_felippa_3x2_num_quad_points;
 
+            dense::Vec< ScalarT, 6 > k[num_wedges_per_hex_cell];
+            extract_local_wedge_scalar_coefficients( k, local_subdomain_id, x_cell, y_cell, r_cell, k_ );
+
             // Compute the local element matrix.
 
             for ( int q = 0; q < num_quad_points; q++ )
@@ -199,6 +206,11 @@ class LaplaceSimple
                     const auto J                = jac( wedge_phy_surf[wedge], r_1, r_2, qp );
                     const auto det              = Kokkos::abs( J.det() );
                     const auto J_inv_transposed = J.inv().transposed();
+                    ScalarType k_eval           = 0.0;
+                    for ( int j = 0; j < num_nodes_per_wedge; j++ )
+                    {
+                        k_eval += shape( j, qp ) * k[wedge]( j );
+                    }
 
                     for ( int i = 0; i < num_nodes_per_wedge; i++ )
                     {
@@ -209,7 +221,7 @@ class LaplaceSimple
                             const auto grad_j = grad_shape( j, qp );
 
                             A[wedge]( i, j ) +=
-                                w * ( ( J_inv_transposed * grad_i ).dot( J_inv_transposed * grad_j ) * det );
+                                w * k_eval * ( ( J_inv_transposed * grad_i ).dot( J_inv_transposed * grad_j ) * det );
                         }
                     }
                 }
@@ -290,7 +302,7 @@ class LaplaceSimple
     }
 };
 
-static_assert( linalg::OperatorLike< LaplaceSimple< float > > );
-static_assert( linalg::OperatorLike< LaplaceSimple< double > > );
+static_assert( linalg::OperatorLike< DivKGradSimple< float > > );
+static_assert( linalg::OperatorLike< DivKGradSimple< double > > );
 
 } // namespace terra::fe::wedge::operators::shell
