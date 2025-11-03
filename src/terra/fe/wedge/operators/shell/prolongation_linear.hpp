@@ -102,36 +102,36 @@ class ProlongationLinear
     }
 
     KOKKOS_INLINE_FUNCTION void
-        operator()( const int local_subdomain_id, const int x_idx, const int y_idx, const int r_idx ) const
+        operator()( const int local_subdomain_id, const int x_fine, const int y_fine, const int r_fine ) const
     {
-        dense::Vec< int, 4 > fine_hex_idx = { local_subdomain_id, x_idx, y_idx, r_idx };
+        dense::Vec< int, 4 > fine_hex_fine = { local_subdomain_id, x_fine, y_fine, r_fine };
 
-        if ( x_idx % 2 == 0 && y_idx % 2 == 0 && r_idx % 2 == 0 )
+        if ( x_fine % 2 == 0 && y_fine % 2 == 0 && r_fine % 2 == 0 )
         {
-            const auto x_coarse = x_idx / 2;
-            const auto y_coarse = y_idx / 2;
-            const auto r_coarse = r_idx / 2;
+            const auto x_coarse = x_fine / 2;
+            const auto y_coarse = y_fine / 2;
+            const auto r_coarse = r_fine / 2;
 
-            dst_( local_subdomain_id, x_idx, y_idx, r_idx ) += src_( local_subdomain_id, x_coarse, y_coarse, r_coarse );
+            dst_( local_subdomain_id, x_fine, y_fine, r_fine ) += src_( local_subdomain_id, x_coarse, y_coarse, r_coarse );
 
             return;
         }
 
-        const auto r_coarse_bot = r_idx < dst_.extent( 3 ) - 1 ? r_idx / 2 : r_idx / 2 - 1;
+        const auto r_coarse_bot = r_fine < dst_.extent( 3 ) - 1 ? r_fine / 2 : r_fine / 2 - 1;
         const auto r_coarse_top = r_coarse_bot + 1;
 
-        if ( x_idx % 2 == 0 && y_idx % 2 == 0 )
+        if ( x_fine % 2 == 0 && y_fine % 2 == 0 )
         {
-            const auto x_coarse = x_idx / 2;
-            const auto y_coarse = y_idx / 2;
+            const auto x_coarse = x_fine / 2;
+            const auto y_coarse = y_fine / 2;
 
             const auto weights = wedge::shell::prolongation_linear_weights(
-                dense::Vec< int, 4 >{ local_subdomain_id, x_idx, y_idx, r_idx },
+                dense::Vec< int, 4 >{ local_subdomain_id, x_fine, y_fine, r_fine },
                 dense::Vec< int, 4 >{ local_subdomain_id, x_coarse, y_coarse, r_coarse_bot },
                 grid_fine_,
                 radii_fine_ );
 
-            dst_( local_subdomain_id, x_idx, y_idx, r_idx ) +=
+            dst_( local_subdomain_id, x_fine, y_fine, r_fine ) +=
                 weights( 0 ) * src_( local_subdomain_id, x_coarse, y_coarse, r_coarse_bot ) +
                 weights( 1 ) * src_( local_subdomain_id, x_coarse, y_coarse, r_coarse_top );
 
@@ -144,42 +144,42 @@ class ProlongationLinear
         int y_coarse_0 = -1;
         int y_coarse_1 = -1;
 
-        if ( x_idx % 2 == 0 )
+        if ( x_fine % 2 == 0 )
         {
             // "Vertical" edge.
-            x_coarse_0 = x_idx / 2;
-            x_coarse_1 = x_idx / 2;
+            x_coarse_0 = x_fine / 2;
+            x_coarse_1 = x_fine / 2;
 
-            y_coarse_0 = y_idx / 2;
-            y_coarse_1 = y_idx / 2 + 1;
+            y_coarse_0 = y_fine / 2;
+            y_coarse_1 = y_fine / 2 + 1;
         }
-        else if ( y_idx % 2 == 0 )
+        else if ( y_fine % 2 == 0 )
         {
             // "Horizontal" edge.
-            x_coarse_0 = x_idx / 2;
-            x_coarse_1 = x_idx / 2 + 1;
+            x_coarse_0 = x_fine / 2;
+            x_coarse_1 = x_fine / 2 + 1;
 
-            y_coarse_0 = y_idx / 2;
-            y_coarse_1 = y_idx / 2;
+            y_coarse_0 = y_fine / 2;
+            y_coarse_1 = y_fine / 2;
         }
         else
         {
             // "Diagonal" edge.
-            x_coarse_0 = x_idx / 2 + 1;
-            x_coarse_1 = x_idx / 2;
+            x_coarse_0 = x_fine / 2 + 1;
+            x_coarse_1 = x_fine / 2;
 
-            y_coarse_0 = y_idx / 2;
-            y_coarse_1 = y_idx / 2 + 1;
+            y_coarse_0 = y_fine / 2;
+            y_coarse_1 = y_fine / 2 + 1;
         }
 
         const auto weights = wedge::shell::prolongation_linear_weights(
-            dense::Vec< int, 4 >{ local_subdomain_id, x_idx, y_idx, r_idx },
+            dense::Vec< int, 4 >{ local_subdomain_id, x_fine, y_fine, r_fine },
             dense::Vec< int, 4 >{ local_subdomain_id, x_coarse_0, y_coarse_0, r_coarse_bot },
             dense::Vec< int, 4 >{ local_subdomain_id, x_coarse_1, y_coarse_1, r_coarse_bot },
             grid_fine_,
             radii_fine_ );
 
-        dst_( local_subdomain_id, x_idx, y_idx, r_idx ) +=
+        dst_( local_subdomain_id, x_fine, y_fine, r_fine ) +=
             weights( 0 ) * src_( local_subdomain_id, x_coarse_0, y_coarse_0, r_coarse_bot ) +
             weights( 0 ) * src_( local_subdomain_id, x_coarse_1, y_coarse_1, r_coarse_bot ) +
             weights( 1 ) * src_( local_subdomain_id, x_coarse_0, y_coarse_0, r_coarse_top ) +
