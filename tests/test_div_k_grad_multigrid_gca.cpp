@@ -77,9 +77,10 @@ struct RHSInterpolator
     Grid3DDataVec< double, 3 > grid_;
     Grid2DDataScalar< double > radii_;
     Grid4DDataScalar< double > data_;
-    const double          alpha_;
-    const double          r_min_;
-    const double          r_max_;
+    const double               alpha_;
+    const double               r_min_;
+    const double               r_max_;
+    const double               k_max_;
 
     RHSInterpolator(
         const Grid3DDataVec< double, 3 >& grid,
@@ -87,13 +88,15 @@ struct RHSInterpolator
         const Grid4DDataScalar< double >& data,
         const double                      r_min,
         const double                      r_max,
-        const double                      alpha )
+        const double                      alpha,
+        const double                      k_max )
     : grid_( grid )
     , radii_( radii )
     , data_( data )
     , alpha_( alpha )
     , r_min_( r_min )
     , r_max_( r_max )
+    , k_max_( k_max )
     {}
 
     KOKKOS_INLINE_FUNCTION
@@ -101,12 +104,18 @@ struct RHSInterpolator
     {
         const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
 
-        // const T value = coords( 0 );
-        const real_t x0 = 0.5 * r_max_;
-        const real_t x1 = 0.5 * r_min_;
-        data_( local_subdomain_id, x, y, r ) =
-            1.5 * ( 0.5 * Kokkos::tanh( alpha_ * ( -x0 - x1 + coords( 2 ) ) / ( x0 - x1 ) ) + 1.5 ) *
-            Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
+        const double x0 = Kokkos::sinh( coords( 1 ) );
+        const double x1 = 2 * coords( 0 );
+        const double x2 = Kokkos::sin( x1 );
+        const double x3 = 0.5 * r_max_;
+        const double x4 = 0.5 * r_min_;
+        const double x5 = Kokkos::sqrt(Kokkos::pow(coords( 0 ), 2) + Kokkos::pow(coords( 1 ), 2) + Kokkos::pow(coords( 2 ), 2));
+        const double x6 = alpha_ / ( x3 - x4 );
+        const double x7 = Kokkos::tanh( x6 * ( -x3 - x4 + x5 ) );
+        const double x8 = 0.5 * k_max_;
+        const double x9 = x6 * ( 1 - Kokkos::pow( x7, 2 ) ) / x5;
+        data_( local_subdomain_id, x, y, r ) =  -0.25 * k_max_ * x2 * x9 * coords( 1 ) * Kokkos::cosh( coords( 1 ) ) -
+               coords( 0 ) * x0 * x8 * x9 * Kokkos::cos( x1 ) + 1.5 * x0 * x2 * ( k_max_ + x8 * ( x7 + 1 ) );
     }
 };
 
@@ -141,6 +150,7 @@ struct KInterpolator
     const double               alpha_;
     const double               r_min_;
     const double               r_max_;
+    const double               k_max_;
 
     KInterpolator(
         const Grid3DDataVec< double, 3 >& grid,
@@ -148,24 +158,26 @@ struct KInterpolator
         const Grid4DDataScalar< double >& data,
         const double                      r_min,
         const double                      r_max,
-        const double                      alpha )
+        const double                      alpha,
+        const double                      k_max )
     : grid_( grid )
     , radii_( radii )
     , data_( data )
     , alpha_( alpha )
     , r_min_( r_min )
     , r_max_( r_max )
+    , k_max_( k_max )
     {}
 
     KOKKOS_INLINE_FUNCTION
     void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
     {
-        const dense::Vec< double, 3 > coords     = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
-        const double                  jump_layer = 0.5 * ( r_max_ + r_min_ );
-        const double                  w          = 0.5 * ( r_max_ - r_min_ );
-        const double value = 1 + 0.5 * ( 1 + Kokkos::tanh( alpha_ * ( coords( 2 ) - jump_layer ) / w ) );
-
-        data_( local_subdomain_id, x, y, r ) = value;
+        const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+        const double                  rad    = coords.norm();
+        const double                  x0     = 0.5 * r_max_;
+        const double                  x1     = 0.5 * r_min_;
+        data_( local_subdomain_id, x, y, r ) =
+            0.5 * k_max_ * ( Kokkos::tanh( alpha_ * ( -x0 - x1 + rad ) / ( x0 - x1 ) ) + 1 ) + k_max_;
     }
 };
 
@@ -180,7 +192,6 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     std::cout << "min_level = " << min_level << ", max_level = " << max_level << std::endl;
 
     std::vector< DistributedDomain > domains;
-
     std::vector< Grid3DDataVec< ScalarType, 3 > > subdomain_shell_coords;
     std::vector< Grid2DDataScalar< ScalarType > > subdomain_radii;
 
@@ -201,6 +212,7 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     const double r_min = 0.5;
     const double r_max = 1.0;
     const double alpha = 1.0;
+    const double k_max = 1.0;
 
     for ( int level = 0; level <= max_level; level++ )
     {
@@ -220,13 +232,14 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     Kokkos::parallel_for(
         "coefficient interpolation",
         local_domain_md_range_policy_nodes( domains.back() ),
-        KInterpolator( subdomain_shell_coords.back(), subdomain_radii.back(), k.grid_data(), r_min, r_max, alpha ) );
+        KInterpolator(
+            subdomain_shell_coords.back(), subdomain_radii.back(), k.grid_data(), r_min, r_max, alpha, k_max ) );
 
     Kokkos::fence();
 
     DivKGrad A( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), k.grid_data(), true, false );
     //A.store_lmatrices();
-   // A.set_single_quadpoint( true );
+    // A.set_single_quadpoint( true );
     DivKGrad A_neumann(
         domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), k.grid_data(), false, false );
     A_neumann.store_lmatrices();
@@ -260,7 +273,13 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
                 "coefficient interpolation",
                 local_domain_md_range_policy_nodes( domains.back() ),
                 KInterpolator(
-                    subdomain_shell_coords.back(), subdomain_radii.back(), k_c.grid_data(), r_min, r_max, alpha ) );
+                    subdomain_shell_coords.back(),
+                    subdomain_radii.back(),
+                    k_c.grid_data(),
+                    r_min,
+                    r_max,
+                    alpha,
+                    k_max ) );
 
             Kokkos::fence();
             A_c.emplace_back(
@@ -301,7 +320,6 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
             TwoGridGCA< ScalarType, DivKGrad >( A_c[level + 1], A_c[level] );
         }
     }
-        
 
     // setup smoothers
     for ( int level = min_level; level <= max_level; level++ )
@@ -354,7 +372,7 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
         "rhs interpolation",
         local_domain_md_range_policy_nodes( domains.back() ),
         RHSInterpolator(
-            subdomain_shell_coords.back(), subdomain_radii.back(), error.grid_data(), r_min, r_max, alpha ) );
+            subdomain_shell_coords.back(), subdomain_radii.back(), error.grid_data(), r_min, r_max, alpha, k_max ) );
 
     Kokkos::fence();
 
@@ -400,12 +418,13 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     linalg::lincomb( error, { 1.0, -1.0 }, { u, solution } );
     const auto l2_error = linalg::norm_2_scaled( error, 1.0 / static_cast< T >( num_dofs ) );
 
-    if ( false )
+    if ( max_level == 3 )
     {
         visualization::XDMFOutput xdmf( ".", subdomain_shell_coords.back(), subdomain_radii.back() );
         xdmf.add( u.grid_data() );
         xdmf.add( solution.grid_data() );
         xdmf.add( error.grid_data() );
+        xdmf.add( k.grid_data() );
         xdmf.write();
     }
 

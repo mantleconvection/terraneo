@@ -267,15 +267,11 @@ class TwoGridGCA
 
                 dense::Mat< ScalarT, 6, 6 > A_fine = fine_op_.get_lmatrix(
                     local_subdomain_id, fine_hex_idx( 1 ), fine_hex_idx( 2 ), fine_hex_idx( 3 ), wedge );
-                //std::cout << "A_fine: " << A_fine << std::endl;
-                //std::cout << "P: " << P << std::endl;
-                //std::cout << PAP << std::endl;
-
-                //auto PAP = P.transposed() * A_fine * P;
-                dense::Mat< ScalarT, 6, 6 > AP  = A_fine * P;
-                dense::Mat< ScalarT, 6, 6 > PAP = P.transposed() * AP;
-                //std::cout << PAP << std::endl;
-
+                
+                // core part: assemble local gca matrix by mapping from coarse wedge to current fine wedge, 
+                // applying the corresponding local operator and mapping back.
+                auto PAP = P.transposed() * A_fine * P;
+               
                 // correctly add to gca coarsened matrix
                 // depending on the fine hex and wedge, we are located on the coarse 0 or 1 wedge
                 // and need to add to the corresponding coarse matrix
@@ -294,7 +290,7 @@ class TwoGridGCA
                 }
                 else
                 {
-                    exit( -1 );
+                    Kokkos::abort("Unexpected path.");
                 }
             }
         }
