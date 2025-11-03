@@ -13,7 +13,7 @@
 namespace terra::fe::wedge::operators::shell {
 
 template < typename ScalarT, typename Operator >
-class TwoGridGalerkinLinear
+class TwoGridGCA
 {
   public:
     using SrcVectorType = linalg::VectorQ1Scalar< double >;
@@ -30,7 +30,7 @@ class TwoGridGalerkinLinear
     bool                               treat_boundary_;
 
   public:
-    explicit TwoGridGalerkinLinear( Operator fine_op, Operator coarse_op, bool treat_boundary )
+    explicit TwoGridGCA( Operator fine_op, Operator coarse_op, bool treat_boundary = true )
     : domain_fine_( fine_op.get_domain() )
     , fine_op_( fine_op )
     , coarse_op_( coarse_op )

@@ -14,6 +14,7 @@ target_sources(terra
         vector_laplace_simple.hpp
         vector_mass.hpp
         div_k_grad.hpp
+        div_k_grad_simple.hpp
         epsilon.hpp
         epsilon_divdiv.hpp
         epsilon_divdiv_stokes.hpp

@@ -5,8 +5,8 @@
 #include "../src/terra/communication/shell/communication.hpp"
 #include "fe/strong_algebraic_dirichlet_enforcement.hpp"
 #include "fe/wedge/integrands.hpp"
+#include "fe/wedge/operators/shell/div_k_grad_simple.hpp"
 #include "fe/wedge/operators/shell/galerkin_coarsening_linear.hpp"
-#include "fe/wedge/operators/shell/laplace_simple.hpp"
 #include "fe/wedge/operators/shell/prolongation_constant.hpp"
 #include "fe/wedge/operators/shell/prolongation_linear.hpp"
 #include "fe/wedge/operators/shell/restriction_constant.hpp"
@@ -63,8 +63,7 @@ struct SolutionInterpolator
     void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
     {
         const dense::Vec< T, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
-        // const T                  value  = coords( 0 ) * Kokkos::sin( coords( 1 ) ) * Kokkos::sinh( coords( 2 ) );
-        const T value = ( 1.0 / 2.0 ) * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
+        const T                  value  = ( 1.0 / 2.0 ) * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
         // const T value = 0.0;
         if ( !only_boundary_ || ( r == 0 || r == radii_.extent( 1 ) - 1 ) )
         {
@@ -73,31 +72,41 @@ struct SolutionInterpolator
     }
 };
 
-template < std::floating_point T >
 struct RHSInterpolator
 {
-    Grid3DDataVec< T, 3 > grid_;
-    Grid2DDataScalar< T > radii_;
-    Grid4DDataScalar< T > data_;
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+    Grid4DDataScalar< double > data_;
+    const double          alpha_;
+    const double          r_min_;
+    const double          r_max_;
 
     RHSInterpolator(
-        const Grid3DDataVec< T, 3 >& grid,
-        const Grid2DDataScalar< T >& radii,
-        const Grid4DDataScalar< T >& data )
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataScalar< double >& data,
+        const double                      r_min,
+        const double                      r_max,
+        const double                      alpha )
     : grid_( grid )
     , radii_( radii )
     , data_( data )
+    , alpha_( alpha )
+    , r_min_( r_min )
+    , r_max_( r_max )
     {}
 
     KOKKOS_INLINE_FUNCTION
     void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
     {
-        const dense::Vec< T, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+        const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
 
         // const T value = coords( 0 );
-        const T value = ( 3.0 / 2.0 ) * Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
-        // const T value                   = 0.0;
-        data_( local_subdomain_id, x, y, r ) = value;
+        const real_t x0 = 0.5 * r_max_;
+        const real_t x1 = 0.5 * r_min_;
+        data_( local_subdomain_id, x, y, r ) =
+            1.5 * ( 0.5 * Kokkos::tanh( alpha_ * ( -x0 - x1 + coords( 2 ) ) / ( x0 - x1 ) ) + 1.5 ) *
+            Kokkos::sin( 2 * coords( 0 ) ) * Kokkos::sinh( coords( 1 ) );
     }
 };
 
@@ -124,13 +133,49 @@ struct SetOnBoundary
     }
 };
 
+struct KInterpolator
+{
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+    Grid4DDataScalar< double > data_;
+    const double               alpha_;
+    const double               r_min_;
+    const double               r_max_;
+
+    KInterpolator(
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataScalar< double >& data,
+        const double                      r_min,
+        const double                      r_max,
+        const double                      alpha )
+    : grid_( grid )
+    , radii_( radii )
+    , data_( data )
+    , alpha_( alpha )
+    , r_min_( r_min )
+    , r_max_( r_max )
+    {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
+    {
+        const dense::Vec< double, 3 > coords     = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+        const double                  jump_layer = 0.5 * ( r_max_ + r_min_ );
+        const double                  w          = 0.5 * ( r_max_ - r_min_ );
+        const double value = 1 + 0.5 * ( 1 + Kokkos::tanh( alpha_ * ( coords( 2 ) - jump_layer ) / w ) );
+
+        data_( local_subdomain_id, x, y, r ) = value;
+    }
+};
+
 template < std::floating_point T, typename Prolongation, typename Restriction >
 T test( int min_level, int max_level, const std::shared_ptr< util::Table >& table, T omega, int prepost_smooth )
 {
     using ScalarType       = T;
-    using Laplace          = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
-    using Smoother         = linalg::solvers::Jacobi< Laplace >;
-    using CoarseGridSolver = linalg::solvers::PCG< Laplace >;
+    using DivKGrad         = fe::wedge::operators::shell::DivKGradSimple< ScalarType >;
+    using Smoother         = linalg::solvers::Jacobi< DivKGrad >;
+    using CoarseGridSolver = linalg::solvers::PCG< DivKGrad >;
 
     std::cout << "min_level = " << min_level << ", max_level = " << max_level << std::endl;
 
@@ -145,7 +190,7 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     std::vector< VectorQ1Scalar< ScalarType > > tmp_r_c;
     std::vector< VectorQ1Scalar< ScalarType > > tmp_e_c;
     std::vector< VectorQ1Scalar< ScalarType > > tmp;
-    std::vector< Laplace >                      A_c;
+    std::vector< DivKGrad >                     A_c;
     std::vector< Prolongation >                 P_additive;
     std::vector< Restriction >                  R;
 
@@ -153,9 +198,13 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
 
     std::vector< VectorQ1Scalar< ScalarType > > coarse_grid_tmps;
 
+    const double r_min = 0.5;
+    const double r_max = 1.0;
+    const double alpha = 1.0;
+
     for ( int level = 0; level <= max_level; level++ )
     {
-        auto domain = DistributedDomain::create_uniform_single_subdomain_per_diamond( level, level, 0.5, 1.0 );
+        auto domain = DistributedDomain::create_uniform_single_subdomain_per_diamond( level, level, r_min, r_max );
         domains.push_back( domain );
 
         subdomain_shell_coords.push_back(
@@ -166,14 +215,25 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
         boundary_mask_data.push_back( grid::shell::setup_boundary_mask_data( domain ) );
     }
 
-    Laplace A( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), true, false );
+    VectorQ1Scalar< ScalarType > k( "k", domains.back(), mask_data.back() );
+    // Set up coefficient data.
+    Kokkos::parallel_for(
+        "coefficient interpolation",
+        local_domain_md_range_policy_nodes( domains.back() ),
+        KInterpolator( subdomain_shell_coords.back(), subdomain_radii.back(), k.grid_data(), r_min, r_max, alpha ) );
+
+    Kokkos::fence();
+
+    DivKGrad A( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), k.grid_data(), true, false );
     //A.store_lmatrices();
-    //A.set_single_quadpoint(true);
-    Laplace A_neumann( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), false, false );
+   // A.set_single_quadpoint( true );
+    DivKGrad A_neumann(
+        domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), k.grid_data(), false, false );
     A_neumann.store_lmatrices();
-    //A_neumann.set_single_quadpoint(true);
-    Laplace A_neumann_diag( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), false, true );
-    //A_neumann_diag.set_single_quadpoint(true);
+    //A_neumann.set_single_quadpoint( true );
+    DivKGrad A_neumann_diag(
+        domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), k.grid_data(), false, true );
+    //A_neumann_diag.set_single_quadpoint( true );
 
     // setup operators (prolongation, restriction, matrix storage)
     for ( int level = min_level; level <= max_level; level++ )
@@ -195,8 +255,16 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
             tmp_r_c.emplace_back( "tmp_r_c_level_" + std::to_string( level ), domains[level], mask_data[level] );
             tmp_e_c.emplace_back( "tmp_e_c_level_" + std::to_string( level ), domains[level], mask_data[level] );
 
-            A_c.emplace_back( domains[level], subdomain_shell_coords[level], subdomain_radii[level], true, false );
-            //A_c.back().set_single_quadpoint(true);
+            VectorQ1Scalar< ScalarType > k_c( "k_c", domains[level], mask_data[level] );
+            Kokkos::parallel_for(
+                "coefficient interpolation",
+                local_domain_md_range_policy_nodes( domains.back() ),
+                KInterpolator(
+                    subdomain_shell_coords.back(), subdomain_radii.back(), k_c.grid_data(), r_min, r_max, alpha ) );
+
+            Kokkos::fence();
+            A_c.emplace_back(
+                domains[level], subdomain_shell_coords[level], subdomain_radii[level], k_c.grid_data(), true, false );
             A_c.back().store_lmatrices();
 
             if constexpr ( std::is_same_v<
@@ -227,14 +295,13 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     {
         if ( level == max_level - 1 )
         {
-            TwoGridGCA< ScalarType, Laplace >( A_neumann, A_c[level], true );
+            TwoGridGCA< ScalarType, DivKGrad >( A_neumann, A_c[level] );
         }
         else
         {
-            TwoGridGCA< ScalarType, Laplace >( A_c[level + 1], A_c[level], true );
+            TwoGridGCA< ScalarType, DivKGrad >( A_c[level + 1], A_c[level] );
         }
     }
-        
         
 
     // setup smoothers
@@ -287,7 +354,8 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     Kokkos::parallel_for(
         "rhs interpolation",
         local_domain_md_range_policy_nodes( domains.back() ),
-        RHSInterpolator( subdomain_shell_coords.back(), subdomain_radii.back(), error.grid_data() ) );
+        RHSInterpolator(
+            subdomain_shell_coords.back(), subdomain_radii.back(), error.grid_data(), r_min, r_max, alpha ) );
 
     Kokkos::fence();
 
@@ -312,12 +380,12 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
 
     Kokkos::fence();
 
-    linalg::solvers::IterativeSolverParameters solver_params{ 100, 1e-7, 1e-7 };
+    linalg::solvers::IterativeSolverParameters solver_params{ 500, 1e-7, 1e-7 };
 
     CoarseGridSolver coarse_grid_solver( solver_params, table, coarse_grid_tmps );
 
-    linalg::solvers::Multigrid< Laplace, Prolongation, Restriction, Smoother, CoarseGridSolver > multigrid_solver(
-        P_additive, R, A_c, tmp_r_c, tmp_e_c, tmp, smoothers, smoothers, coarse_grid_solver, 20, 1e-6 );
+    linalg::solvers::Multigrid< DivKGrad, Prolongation, Restriction, Smoother, CoarseGridSolver > multigrid_solver(
+        P_additive, R, A_c, tmp_r_c, tmp_e_c, tmp, smoothers, smoothers, coarse_grid_solver, 50, 1e-6 );
 
     multigrid_solver.collect_statistics( table );
 
