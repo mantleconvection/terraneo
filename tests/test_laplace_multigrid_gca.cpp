@@ -222,20 +222,17 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     }
 
     // setup gca coarse ops
-    
     for ( int level = max_level - 1; level >= min_level; level-- )
     {
         if ( level == max_level - 1 )
         {
-            TwoGridGCA< ScalarType, Laplace >( A_neumann, A_c[level], true );
+            TwoGridGCA< ScalarType, Laplace >( A_neumann, A_c[level] );
         }
         else
         {
-            TwoGridGCA< ScalarType, Laplace >( A_c[level + 1], A_c[level], true );
+            TwoGridGCA< ScalarType, Laplace >( A_c[level + 1], A_c[level] );
         }
     }
-        
-        
 
     // setup smoothers
     for ( int level = min_level; level <= max_level; level++ )

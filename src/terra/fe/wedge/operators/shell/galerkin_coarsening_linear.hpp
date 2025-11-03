@@ -155,7 +155,7 @@ class TwoGridGCA
 
                     // else: need radial direction bot (>=) and top (<=) of current fine DoF
                     const auto r_idx_coarse_bot =
-                        fine_dof_idx( 3 ) < domain_fine_.domain_info().subdomain_num_nodes_radially() - 1 ?
+                        fine_dof_idx( 3 ) < radii_fine_.extent(1) - 1 ?
                             fine_dof_idx( 3 ) / 2 :
                             fine_dof_idx( 3 ) / 2 - 1;
                     const auto r_idx_coarse_top = r_idx_coarse_bot + 1;
@@ -271,7 +271,9 @@ class TwoGridGCA
                 //std::cout << "P: " << P << std::endl;
                 //std::cout << PAP << std::endl;
 
-                auto PAP = P.transposed() * A_fine * P;
+                //auto PAP = P.transposed() * A_fine * P;
+                dense::Mat< ScalarT, 6, 6 > AP  = A_fine * P;
+                dense::Mat< ScalarT, 6, 6 > PAP = P.transposed() * AP;
                 //std::cout << PAP << std::endl;
 
                 // correctly add to gca coarsened matrix

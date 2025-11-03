@@ -290,7 +290,6 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     }
 
     // setup gca coarse ops
-    
     for ( int level = max_level - 1; level >= min_level; level-- )
     {
         if ( level == max_level - 1 )
