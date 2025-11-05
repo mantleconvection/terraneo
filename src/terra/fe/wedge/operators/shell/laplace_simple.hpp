@@ -29,7 +29,7 @@ class LaplaceSimple
     bool applyStoredLMatrices_ =
         false; // set to make apply_impl() load and use the stored LMatrices for the operator application
     Grid4DDataLocalMatrices lmatrices_;
-    bool                    single_quadpoint_ = false;
+    bool                    single_quadpoint_ = true;
 
     grid::shell::DistributedDomain domain_;
 
@@ -47,6 +47,11 @@ class LaplaceSimple
 
     grid::Grid4DDataScalar< ScalarType > src_;
     grid::Grid4DDataScalar< ScalarType > dst_;
+
+    dense::Vec< ScalarT, 3 > quad_points_3x2_[quadrature::quad_felippa_3x2_num_quad_points];
+    ScalarT                  quad_weights_3x2_[quadrature::quad_felippa_3x2_num_quad_points];
+    dense::Vec< ScalarT, 3 > quad_points_1x1_[quadrature::quad_felippa_1x1_num_quad_points];
+    ScalarT                  quad_weights_1x1_[quadrature::quad_felippa_1x1_num_quad_points];
 
   public:
     LaplaceSimple(
@@ -68,7 +73,12 @@ class LaplaceSimple
     // TODO: we can reuse the send and recv buffers and pass in from the outside somehow
     , send_buffers_( domain )
     , recv_buffers_( domain )
-    {}
+    {
+        quadrature::quad_felippa_1x1_quad_points( quad_points_1x1_ );
+        quadrature::quad_felippa_1x1_quad_weights( quad_weights_1x1_ );
+        quadrature::quad_felippa_3x2_quad_points( quad_points_3x2_ );
+        quadrature::quad_felippa_3x2_quad_weights( quad_weights_3x2_ );
+    }
 
     /// @brief Getter for domain member
     grid::shell::DistributedDomain& get_domain() { return domain_; }
@@ -81,6 +91,9 @@ class LaplaceSimple
 
     /// @brief S/Getter for diagonal member
     void set_diagonal( bool v ) { diagonal_ = v; }
+
+    /// @brief S/Getter for quadpoint member
+    void set_single_quadpoint( bool v ) { single_quadpoint_ = v; }
 
     /// @brief Retrives the local matrix stored in the operator
     KOKKOS_INLINE_FUNCTION
@@ -156,7 +169,7 @@ class LaplaceSimple
         }
     }
 
-        KOKKOS_INLINE_FUNCTION void
+    KOKKOS_INLINE_FUNCTION void
         operator()( const int local_subdomain_id, const int x_cell, const int y_cell, const int r_cell ) const
     {
         dense::Mat< ScalarT, 6, 6 > A[num_wedges_per_hex_cell] = {};
@@ -171,26 +184,15 @@ class LaplaceSimple
             const ScalarT r_2 = radii_( local_subdomain_id, r_cell + 1 );
 
             // Quadrature points.
-            int num_quad_points = quadrature::quad_felippa_1x2_num_quad_points;
-
-            dense::Vec< ScalarT, 3 > quad_points_1x2[quadrature::quad_felippa_1x2_num_quad_points];
-            ScalarT                  quad_weights_1x2[quadrature::quad_felippa_1x2_num_quad_points];
-            quadrature::quad_felippa_1x2_quad_points( quad_points_1x2 );
-            quadrature::quad_felippa_1x2_quad_weights( quad_weights_1x2 );
-           
-           /* int num_quad_points = quadrature::quad_felippa_3x2_num_quad_points;
-
-            dense::Vec< ScalarT, 3 > quad_points_3x2[quadrature::quad_felippa_3x2_num_quad_points];
-            ScalarT                  quad_weights_3x2[quadrature::quad_felippa_3x2_num_quad_points];
-            quadrature::quad_felippa_3x2_quad_points( quad_points_3x2 );
-            quadrature::quad_felippa_3x2_quad_weights( quad_weights_3x2 );*/
+            int num_quad_points = single_quadpoint_ ? quadrature::quad_felippa_1x1_num_quad_points :
+                                                      quadrature::quad_felippa_3x2_num_quad_points;
 
             // Compute the local element matrix.
 
             for ( int q = 0; q < num_quad_points; q++ )
             {
-                const auto w  = quad_weights_1x2[q];
-                const auto qp = quad_points_1x2[q];
+                const auto w  = single_quadpoint_ ? quad_weights_1x1_[q] : quad_weights_3x2_[q];
+                const auto qp = single_quadpoint_ ? quad_points_1x1_[q] : quad_points_3x2_[q];
 
                 for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
                 {
