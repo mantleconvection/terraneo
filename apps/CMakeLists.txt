@@ -1,2 +1,3 @@
 add_subdirectory(benchmarks)
+add_subdirectory(mantlecirculation)
 add_subdirectory(tools)
