@@ -58,6 +58,10 @@ class Jacobi
         }
     }
 
+    SolutionVectorType& get_inverse_diagonal() {
+      return inverse_diagonal_;
+    }
+    
   private:
     SolutionVectorType inverse_diagonal_; ///< Inverse diagonal vector.
     int                iterations_;       ///< Number of iterations.

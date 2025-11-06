@@ -45,6 +45,24 @@ KOKKOS_INLINE_FUNCTION constexpr void
     quad_weights[0] = 1.0;
 }
 
+constexpr int quad_felippa_1x2_num_quad_points = 2;
+
+template < std::floating_point T >
+KOKKOS_INLINE_FUNCTION constexpr void
+    quad_felippa_1x2_quad_points( dense::Vec< T, 3 > ( &quad_points )[quad_felippa_1x2_num_quad_points] )
+{
+    quad_points[0] = { 1.0 / 3.0, 1.0 / 3.0, 1.0/Kokkos::sqrt(3) };
+    quad_points[1] = { 1.0 / 3.0, 1.0 / 3.0, -1.0/Kokkos::sqrt(3) };
+}
+
+template < std::floating_point T >
+KOKKOS_INLINE_FUNCTION constexpr void
+    quad_felippa_1x2_quad_weights( T ( &quad_weights )[quad_felippa_1x2_num_quad_points] )
+{
+    quad_weights[0] = 0.5;
+    quad_weights[1] = 0.5;
+}
+
 constexpr int quad_felippa_3x2_num_quad_points = 6;
 
 template < std::floating_point T >

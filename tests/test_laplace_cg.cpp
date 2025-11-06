@@ -136,12 +136,9 @@ double test( int level, const std::shared_ptr< util::Table >& table )
     using Laplace = fe::wedge::operators::shell::LaplaceSimple< ScalarType >;
 
     Laplace A( domain, coords_shell, coords_radii, true, false );
-    A.set_single_quadpoint( true );
     Laplace A_neumann( domain, coords_shell, coords_radii, false, false );
-    A_neumann.set_single_quadpoint( true );
     Laplace A_neumann_diag( domain, coords_shell, coords_radii,  false, true );
-    A_neumann_diag.set_single_quadpoint( true );
-
+   
     using Mass = fe::wedge::operators::shell::Mass< ScalarType >;
 
     Mass M( domain, coords_shell, coords_radii, false );
