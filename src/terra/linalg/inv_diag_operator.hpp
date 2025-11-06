@@ -12,11 +12,8 @@ class InvDiagOperator
 {
   public:
     using OperatorType  = OperatorT;
-    //using SrcVectorType = SrcOf< OperatorT >;
-    //using DstVectorType = DstOf< OperatorT >;
-    //using ScalarType    = ScalarOf< DstVectorType >;
-    using SrcVectorType = linalg::VectorQ1Scalar< double >;
-    using DstVectorType = linalg::VectorQ1Scalar< double >;
+    using SrcVectorType = SrcOf< OperatorT >;
+    using DstVectorType = DstOf< OperatorT >;
     using ScalarType    = ScalarOf< DstVectorType >;
 
   private:

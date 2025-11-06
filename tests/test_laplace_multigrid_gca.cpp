@@ -172,15 +172,13 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     }
 
     std::cout << "Creating operators..." << std::endl;
-    Laplace A( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), true, false );
-    //A.store_lmatrices();
-    //A.set_single_quadpoint(true);
-    Laplace A_neumann( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), false, false );
+    bool single_qp = true;
+    Laplace A( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), true, false, single_qp );
+    A.store_lmatrices();
+    Laplace A_neumann( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), false, false, single_qp );
     A_neumann.store_lmatrices();
-    //A_neumann.set_single_quadpoint(true);
-    Laplace A_neumann_diag( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), false, true );
-    //A_neumann_diag.set_single_quadpoint(true);
-
+    Laplace A_neumann_diag( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), false, true, single_qp );
+    
     // setup operators (prolongation, restriction, matrix storage)
     for ( int level = min_level; level <= max_level; level++ )
     {
@@ -201,7 +199,7 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
             tmp_r_c.emplace_back( "tmp_r_c_level_" + std::to_string( level ), domains[level], mask_data[level] );
             tmp_e_c.emplace_back( "tmp_e_c_level_" + std::to_string( level ), domains[level], mask_data[level] );
 
-            A_c.emplace_back( domains[level], subdomain_shell_coords[level], subdomain_radii[level], true, false );
+            A_c.emplace_back( domains[level], subdomain_shell_coords[level], subdomain_radii[level], true, false, single_qp );
             A_c.back().set_single_quadpoint( true );
             A_c.back().store_lmatrices();
 
@@ -228,7 +226,7 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     }
 
     // setup gca coarse ops
-    if ( false )
+    if ( true )
     {
         std::cout << "Forming gca coarse-grid ..." << std::endl;
         for ( int level = max_level - 1; level >= min_level; level-- )
@@ -259,15 +257,14 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
         assign( tmp_smoother, 1.0 );
         if ( level < max_level )
         {
-            A_c[level - min_level].set_single_quadpoint( true );
+            A_c[level - min_level].set_single_quadpoint( single_qp );
             A_c[level - min_level].set_diagonal( true );
-            //   A_c[level - min_level].set_single_quadpoint( false );
             apply( A_c[level - min_level], tmp_smoother, inverse_diagonal );
             A_c[level - min_level].set_diagonal( false );
         }
         else
         {
-            A.set_single_quadpoint( true );
+            A.set_single_quadpoint( single_qp );
             A.set_diagonal( true );
             //A.set_single_quadpoint( false );
             apply( A, tmp_smoother, inverse_diagonal );
@@ -277,6 +274,7 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
 
         linalg::invert_entries( inverse_diagonal );
 
+        // determine estimate for maximum eigenvalue
         T max_ev = 0.0;
         if ( level < max_level )
         {
@@ -289,12 +287,13 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
             max_ev = power_iteration< InvDiagOperator< Laplace > >( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
         }
 
-        T cheby_weight = 2.0 / ( 1.5 * max_ev );
-        std::cout << "Maximum ev on level " << level << ": " << max_ev << ", cheby weight: " << cheby_weight
+        // compute optimal jacobi weight: omega_opt = 2/(lambda_min + lambda_max)
+        T omega_opt = 2.0 / ( 1.5 * max_ev );
+        std::cout << "Maximum ev on level " << level << ": " << max_ev << ", optimal omega: " << omega_opt
                   << std::endl;
 
         smoothers.emplace_back(
-            inverse_diagonal, prepost_smooth, tmp_smoother, cheby_weight ); //1.0/(0.5*(1.3*omega)) );
+            inverse_diagonal, prepost_smooth, tmp_smoother, omega_opt ); 
     }
 
     VectorQ1Scalar< ScalarType > u( "u", domains.back(), mask_data.back() );
