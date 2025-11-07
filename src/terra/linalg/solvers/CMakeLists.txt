@@ -1,6 +1,7 @@
 target_sources(terra
         PRIVATE
         identity_solver.hpp
+        diagonal_solver.hpp
         iterative_solver_info.hpp
         jacobi.hpp
         multigrid.hpp

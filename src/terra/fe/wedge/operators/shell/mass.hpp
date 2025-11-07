@@ -4,8 +4,8 @@
 #include "communication/shell/communication.hpp"
 #include "dense/vec.hpp"
 #include "fe/wedge/integrands.hpp"
-#include "fe/wedge/quadrature/quadrature.hpp"
 #include "fe/wedge/kernel_helpers.hpp"
+#include "fe/wedge/quadrature/quadrature.hpp"
 #include "grid/shell/spherical_shell.hpp"
 #include "linalg/operator.hpp"
 #include "linalg/vector.hpp"
@@ -28,6 +28,7 @@ class Mass
     grid::Grid2DDataScalar< ScalarT > radii_;
 
     bool diagonal_;
+    bool lumped_diagonal_;
 
     linalg::OperatorApplyMode         operator_apply_mode_;
     linalg::OperatorCommunicationMode operator_communication_mode_;
@@ -44,6 +45,7 @@ class Mass
         const grid::Grid3DDataVec< ScalarT, 3 >& grid,
         const grid::Grid2DDataScalar< ScalarT >& radii,
         const bool                               diagonal,
+        const bool                               lumped_diagonal     = false,
         linalg::OperatorApplyMode                operator_apply_mode = linalg::OperatorApplyMode::Replace,
         linalg::OperatorCommunicationMode        operator_communication_mode =
             linalg::OperatorCommunicationMode::CommunicateAdditively )
@@ -57,6 +59,12 @@ class Mass
     , send_buffers_( domain )
     , recv_buffers_( domain )
     {}
+
+    /// @brief S/Getter for diagonal member
+    void set_diagonal( bool v ) { diagonal_ = v; }
+
+    /// @brief S/Getter for lumped diagonal member
+    void set_lumped_diagonal( bool v ) { lumped_diagonal_ = v; }
 
     void apply_impl( const SrcVectorType& src, DstVectorType& dst )
     {
@@ -139,6 +147,13 @@ class Mass
         {
             A[0] = A[0].diagonal();
             A[1] = A[1].diagonal();
+        }
+        else if ( lumped_diagonal_ )
+        {
+            dense::Vec< ScalarT, 6 > ones;
+            ones.fill( 1.0 );
+            A[0] = dense::Mat< ScalarT, 6, 6 >::diagonal_from_vec(A[0] * ones);
+            A[1] = dense::Mat< ScalarT, 6, 6 >::diagonal_from_vec(A[1] * ones);
         }
 
         dense::Vec< ScalarT, 6 > src[num_wedges_per_hex_cell];

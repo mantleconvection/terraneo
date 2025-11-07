@@ -1,0 +1,600 @@
+
+
+#include "../src/terra/communication/shell/communication.hpp"
+#include "fe/strong_algebraic_dirichlet_enforcement.hpp"
+#include "fe/wedge/integrands.hpp"
+#include "fe/wedge/operators/shell/epsilon_divdiv_stokes.hpp"
+#include "fe/wedge/operators/shell/galerkin_coarsening_linear.hpp"
+#include "fe/wedge/operators/shell/identity.hpp"
+#include "fe/wedge/operators/shell/laplace_simple.hpp"
+#include "fe/wedge/operators/shell/mass.hpp"
+#include "fe/wedge/operators/shell/prolongation_constant.hpp"
+#include "fe/wedge/operators/shell/restriction_constant.hpp"
+#include "fe/wedge/operators/shell/stokes.hpp"
+#include "fe/wedge/operators/shell/vector_laplace_simple.hpp"
+#include "fe/wedge/operators/shell/vector_mass.hpp"
+#include "linalg/solvers/block_preconditioner_2x2.hpp"
+#include "linalg/solvers/fgmres.hpp"
+#include "linalg/solvers/jacobi.hpp"
+#include "linalg/solvers/multigrid.hpp"
+#include "linalg/solvers/pbicgstab.hpp"
+#include "linalg/solvers/pcg.hpp"
+#include "linalg/solvers/pminres.hpp"
+#include "linalg/solvers/richardson.hpp"
+#include "linalg/vector_q1isoq2_q1.hpp"
+#include "terra/dense/mat.hpp"
+#include "terra/fe/wedge/operators/shell/mass.hpp"
+#include "terra/grid/grid_types.hpp"
+#include "terra/grid/shell/spherical_shell.hpp"
+#include "terra/kernels/common/grid_operations.hpp"
+#include "terra/kokkos/kokkos_wrapper.hpp"
+#include "terra/linalg/inv_diag_operator.hpp"
+#include "terra/linalg/solvers/diagonal_solver.hpp"
+#include "terra/linalg/solvers/power_iteration.hpp"
+#include "terra/visualization/vtk.hpp"
+#include "util/init.hpp"
+#include "util/table.hpp"
+
+using namespace terra;
+
+using grid::Grid2DDataScalar;
+using grid::Grid3DDataScalar;
+using grid::Grid3DDataVec;
+using grid::Grid4DDataScalar;
+using grid::Grid4DDataVec;
+using grid::shell::DistributedDomain;
+using grid::shell::DomainInfo;
+using grid::shell::SubdomainInfo;
+using linalg::VectorQ1IsoQ2Q1;
+using linalg::VectorQ1Scalar;
+using linalg::VectorQ1Vec;
+using terra::fe::wedge::operators::shell::TwoGridGCA;
+using terra::linalg::InvDiagOperator;
+using terra::linalg::solvers::DiagonalSolver;
+using terra::linalg::solvers::power_iteration;
+
+struct SolutionVelocityInterpolator
+{
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+    Grid4DDataVec< double, 3 > data_u_;
+    bool                       only_boundary_;
+
+    SolutionVelocityInterpolator(
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataVec< double, 3 >& data_u,
+        const bool                        only_boundary )
+    : grid_( grid )
+    , radii_( radii )
+    , data_u_( data_u )
+    , only_boundary_( only_boundary )
+    {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
+    {
+        const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+
+        const double cx = coords( 0 );
+        const double cy = coords( 1 );
+        const double cz = coords( 2 );
+
+        if ( !only_boundary_ || ( r == 0 || r == radii_.extent( 1 ) - 1 ) )
+        {
+            data_u_( local_subdomain_id, x, y, r, 0 ) = -4 * Kokkos::cos( 4 * cz );
+            data_u_( local_subdomain_id, x, y, r, 1 ) = 8 * Kokkos::cos( 8 * cx );
+            data_u_( local_subdomain_id, x, y, r, 2 ) = -2 * Kokkos::cos( 2 * cy );
+        }
+    }
+};
+
+struct SolutionPressureInterpolator
+{
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+    Grid4DDataScalar< double > data_p_;
+    bool                       only_boundary_;
+
+    SolutionPressureInterpolator(
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataScalar< double >& data_p,
+        const bool                        only_boundary )
+    : grid_( grid )
+    , radii_( radii )
+    , data_p_( data_p )
+    , only_boundary_( only_boundary )
+    {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
+    {
+        const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+
+        const double cx = coords( 0 );
+        const double cy = coords( 1 );
+        const double cz = coords( 2 );
+
+        if ( !only_boundary_ || ( r == 0 || r == radii_.extent( 1 ) - 1 ) )
+        {
+            data_p_( local_subdomain_id, x, y, r ) =
+                Kokkos::sin( 4 * cx ) * Kokkos::sin( 8 * cy ) * Kokkos::sin( 2 * cz );
+        }
+    }
+};
+
+struct RHSVelocityInterpolator
+{
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+    Grid4DDataVec< double, 3 > data_u_;
+
+    RHSVelocityInterpolator(
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataVec< double, 3 >& data_u )
+    : grid_( grid )
+    , radii_( radii )
+    , data_u_( data_u )
+
+    {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
+    {
+        const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+
+        const real_t x0 = 4 * coords( 2 );
+        data_u_( local_subdomain_id, x, y, r, 0 ) =
+            -64.0 * ( Kokkos::sin( coords( 2 ) ) + 2 ) * Kokkos::cos( x0 ) -
+            16.0 * Kokkos::sin( x0 ) * Kokkos::cos( coords( 2 ) ) +
+            4 * Kokkos::sin( 8 * coords( 1 ) ) * Kokkos::sin( 2 * coords( 2 ) ) * Kokkos::cos( 4 * coords( 0 ) );
+        data_u_( local_subdomain_id, x, y, r, 1 ) =
+            512.0 * ( Kokkos::sin( coords( 2 ) ) + 2 ) * Kokkos::cos( 8 * coords( 0 ) ) +
+            8 * Kokkos::sin( 4 * coords( 0 ) ) * Kokkos::sin( 2 * coords( 2 ) ) * Kokkos::cos( 8 * coords( 1 ) ) -
+            4.0 * Kokkos::sin( 2 * coords( 1 ) ) * Kokkos::cos( coords( 2 ) );
+
+        data_u_( local_subdomain_id, x, y, r, 2 ) =
+            -8.0 * ( Kokkos::sin( coords( 2 ) ) + 2 ) * Kokkos::cos( 2 * coords( 1 ) ) +
+            2 * Kokkos::sin( 4 * coords( 0 ) ) * Kokkos::sin( 8 * coords( 1 ) ) * Kokkos::cos( 2 * coords( 2 ) );
+    }
+};
+
+struct SetOnBoundary
+{
+    Grid4DDataVec< double, 3 > src_;
+    Grid4DDataVec< double, 3 > dst_;
+    int                        num_shells_;
+
+    SetOnBoundary( const Grid4DDataVec< double, 3 >& src, const Grid4DDataVec< double, 3 >& dst, const int num_shells )
+    : src_( src )
+    , dst_( dst )
+    , num_shells_( num_shells )
+    {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()( const int local_subdomain_idx, const int x, const int y, const int r ) const
+    {
+        if ( ( r == 0 || r == num_shells_ - 1 ) )
+        {
+            for ( int d = 0; d < 3; ++d )
+            {
+                dst_( local_subdomain_idx, x, y, r, d ) = src_( local_subdomain_idx, x, y, r, d );
+            }
+        }
+    }
+};
+
+struct KInterpolator
+{
+    Grid3DDataVec< double, 3 > grid_;
+    Grid2DDataScalar< double > radii_;
+    Grid4DDataScalar< double > data_;
+
+    KInterpolator(
+        const Grid3DDataVec< double, 3 >& grid,
+        const Grid2DDataScalar< double >& radii,
+        const Grid4DDataScalar< double >& data )
+    : grid_( grid )
+    , radii_( radii )
+    , data_( data )
+    {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
+    {
+        const dense::Vec< double, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+        const double                  value  = 2 + Kokkos::sin( coords( 2 ) );
+        data_( local_subdomain_id, x, y, r ) = value;
+    }
+};
+
+std::pair< double, double > test( int min_level, int max_level, const std::shared_ptr< util::Table >& table )
+{
+    using ScalarType = double;
+
+    // Set up domains for all levels.
+
+    std::vector< DistributedDomain >                                  domains;
+    std::vector< Grid3DDataVec< double, 3 > >                         coords_shell;
+    std::vector< Grid2DDataScalar< double > >                         coords_radii;
+    std::vector< Grid4DDataScalar< grid::NodeOwnershipFlag > >        mask_data;
+    std::vector< Grid4DDataScalar< grid::shell::ShellBoundaryFlag > > boundary_mask_data;
+
+    std::cout << "Allocating domains ... " << std::endl;
+    for ( int level = min_level; level <= max_level; level++ )
+    {
+        const int idx = level - min_level;
+
+        domains.push_back( DistributedDomain::create_uniform_single_subdomain_per_diamond( level, level, 0.5, 1.0 ) );
+        coords_shell.push_back( grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domains[idx] ) );
+        coords_radii.push_back( grid::shell::subdomain_shell_radii< ScalarType >( domains[idx] ) );
+        mask_data.push_back( grid::setup_node_ownership_mask_data( domains[idx] ) );
+        boundary_mask_data.push_back( grid::shell::setup_boundary_mask_data( domains[idx] ) );
+    }
+
+    VectorQ1Scalar< ScalarType > k( "k", domains[max_level - min_level], mask_data[max_level - min_level] );
+    const auto                   num_levels     = domains.size();
+    const auto                   velocity_level = num_levels - 1;
+    const auto                   pressure_level = num_levels - 2;
+
+    // Set up Stokes vectors for the finest grid.
+
+    std::map< std::string, VectorQ1IsoQ2Q1< ScalarType > > stok_vecs;
+    std::vector< std::string >                             stok_vec_names = { "u", "f", "solution", "error" };
+    constexpr int                                          num_stok_tmps  = 8;
+
+    std::cout << "Allocating temps ... " << std::endl;
+    for ( int i = 0; i < num_stok_tmps; i++ )
+    {
+        stok_vec_names.push_back( "tmp_" + std::to_string( i ) );
+    }
+
+    for ( const auto& name : stok_vec_names )
+    {
+        stok_vecs[name] = VectorQ1IsoQ2Q1< ScalarType >(
+            name,
+            domains[velocity_level],
+            domains[pressure_level],
+            mask_data[velocity_level],
+            mask_data[pressure_level] );
+    }
+
+    auto& u        = stok_vecs["u"];
+    auto& f        = stok_vecs["f"];
+    auto& solution = stok_vecs["solution"];
+    auto& error    = stok_vecs["error"];
+
+    // Set up tmp vecs for multigrid.
+
+    std::vector< VectorQ1Vec< ScalarType > > tmp_mg;
+    std::vector< VectorQ1Vec< ScalarType > > tmp_mg_r;
+    std::vector< VectorQ1Vec< ScalarType > > tmp_mg_e;
+
+    for ( int level = 0; level < num_levels; level++ )
+    {
+        tmp_mg.emplace_back( "tmp_mg_" + std::to_string( level ), domains[level], mask_data[level] );
+        if ( level < num_levels - 1 )
+        {
+            tmp_mg_r.emplace_back( "tmp_mg_r_" + std::to_string( level ), domains[level], mask_data[level] );
+            tmp_mg_e.emplace_back( "tmp_mg_e_" + std::to_string( level ), domains[level], mask_data[level] );
+        }
+    }
+
+    // Counting DoFs.
+
+    const auto num_dofs_velocity =
+        3 * kernels::common::count_masked< long >( mask_data[num_levels - 1], grid::NodeOwnershipFlag::OWNED );
+    const auto num_dofs_pressure =
+        kernels::common::count_masked< long >( mask_data[num_levels - 2], grid::NodeOwnershipFlag::OWNED );
+
+    // Set up operators.
+
+    std::cout << "Setting operators ... " << std::endl;
+    using Stokes      = fe::wedge::operators::shell::EpsDivDivStokes< ScalarType >;
+    using Viscous     = Stokes::Block11Type;
+    using Gradient    = Stokes::Block12Type;
+    using ViscousMass = fe::wedge::operators::shell::VectorMass< ScalarType >;
+
+    using Prolongation = fe::wedge::operators::shell::ProlongationVecConstant< ScalarType >;
+    using Restriction  = fe::wedge::operators::shell::RestrictionVecConstant< ScalarType >;
+
+    Kokkos::parallel_for(
+        "coefficient interpolation",
+        local_domain_md_range_policy_nodes( domains[velocity_level] ),
+        KInterpolator( coords_shell[velocity_level], coords_radii[velocity_level], k.grid_data() ) );
+
+    Stokes K(
+        domains[velocity_level],
+        domains[pressure_level],
+        coords_shell[velocity_level],
+        coords_radii[velocity_level],
+        k.grid_data(),
+        true,
+        false );
+
+    Stokes K_neumann(
+        domains[velocity_level],
+        domains[pressure_level],
+        coords_shell[velocity_level],
+        coords_radii[velocity_level],
+
+        k.grid_data(),
+        false,
+        false );
+
+    Stokes K_neumann_diag(
+        domains[velocity_level],
+        domains[pressure_level],
+        coords_shell[velocity_level],
+        coords_radii[velocity_level],
+        k.grid_data(),
+        false,
+        true );
+
+    ViscousMass M( domains[velocity_level], coords_shell[velocity_level], coords_radii[velocity_level], false );
+
+    // Multigrid operators
+
+    std::vector< Viscous >      A_diag;
+    std::vector< Viscous >      A_c;
+    std::vector< Prolongation > P;
+    std::vector< Restriction >  R;
+
+    std::vector< VectorQ1Vec< ScalarType > > inverse_diagonals;
+
+    std::cout << "MG hierarchy ... " << std::endl;
+
+    for ( int level = 0; level < num_levels; level++ )
+    {
+        VectorQ1Scalar< ScalarType > k_c( "k_c", domains[level - min_level], mask_data[level - min_level] );
+        Kokkos::parallel_for(
+            "coefficient interpolation",
+            local_domain_md_range_policy_nodes( domains[velocity_level] ),
+            KInterpolator( coords_shell[velocity_level], coords_radii[velocity_level], k_c.grid_data() ) );
+        A_diag.emplace_back( domains[level], coords_shell[level], coords_radii[level], k_c.grid_data(), true, true );
+
+        inverse_diagonals.emplace_back(
+            "inverse_diagonal_" + std::to_string( level ), domains[level], mask_data[level] );
+
+        VectorQ1Vec< ScalarType > tmp(
+            "inverse_diagonal_tmp" + std::to_string( level ), domains[level], mask_data[level] );
+
+        linalg::assign( tmp, 1.0 );
+        linalg::apply( A_diag[level], tmp, inverse_diagonals.back() );
+        linalg::invert_entries( inverse_diagonals.back() );
+
+        if ( level < num_levels - 1 )
+        {
+            A_c.emplace_back( domains[level], coords_shell[level], coords_radii[level], k_c.grid_data(), true, false );
+            P.emplace_back( linalg::OperatorApplyMode::Add );
+            R.emplace_back( domains[level] );
+        }
+    }
+
+    // Set up solution data.
+
+    Kokkos::parallel_for(
+        "solution interpolation",
+        local_domain_md_range_policy_nodes( domains[velocity_level] ),
+        SolutionVelocityInterpolator(
+            coords_shell[velocity_level],
+            coords_radii[velocity_level],
+            stok_vecs["solution"].block_1().grid_data(),
+            false ) );
+
+    Kokkos::parallel_for(
+        "solution interpolation",
+        local_domain_md_range_policy_nodes( domains[pressure_level] ),
+        SolutionPressureInterpolator(
+            coords_shell[pressure_level],
+            coords_radii[pressure_level],
+            stok_vecs["solution"].block_2().grid_data(),
+            false ) );
+
+    // Set up rhs data.
+
+    Kokkos::parallel_for(
+        "rhs interpolation",
+        local_domain_md_range_policy_nodes( domains[velocity_level] ),
+        RHSVelocityInterpolator(
+            coords_shell[velocity_level], coords_radii[velocity_level], stok_vecs["tmp_1"].block_1().grid_data() ) );
+
+    linalg::apply( M, stok_vecs["tmp_1"].block_1(), stok_vecs["f"].block_1() );
+
+    // Set up boundary data.
+
+    Kokkos::parallel_for(
+        "boundary interpolation",
+        local_domain_md_range_policy_nodes( domains[velocity_level] ),
+        SolutionVelocityInterpolator(
+            coords_shell[velocity_level],
+            coords_radii[velocity_level],
+            stok_vecs["tmp_0"].block_1().grid_data(),
+            true ) );
+
+    fe::strong_algebraic_velocity_dirichlet_enforcement_stokes_like(
+        K_neumann,
+        K_neumann_diag,
+        stok_vecs["tmp_0"],
+        stok_vecs["tmp_1"],
+        stok_vecs["f"],
+        boundary_mask_data[velocity_level],
+        grid::shell::ShellBoundaryFlag::BOUNDARY );
+
+    // Set up solvers.
+
+    // Multigrid preconditioner for velocity block
+
+    using Smoother = linalg::solvers::Jacobi< Viscous >;
+
+    std::vector< Smoother > smoothers;
+    for ( int level = 0; level < num_levels; level++ )
+    {
+        constexpr auto            smoother_prepost = 3;
+        VectorQ1Vec< ScalarType > tmp_pi_0( "tmp_pi_0" + std::to_string( level ), domains[level], mask_data[level] );
+        VectorQ1Vec< ScalarType > tmp_pi_1( "tmp_pi_1" + std::to_string( level ), domains[level], mask_data[level] );
+        double                    max_ev = 0.0;
+        if ( level == num_levels - 1 )
+        {
+            InvDiagOperator< Viscous > inv_diag_A( K.block_11(), inverse_diagonals[level] );
+            max_ev = power_iteration< InvDiagOperator< Viscous > >( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
+        }
+        else
+        {
+            InvDiagOperator< Viscous > inv_diag_A( A_c[level], inverse_diagonals[level] );
+            max_ev = power_iteration< InvDiagOperator< Viscous > >( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
+        }
+        const auto omega_opt = 2.0 / ( 1.5 * max_ev );
+        smoothers.emplace_back( inverse_diagonals[level], smoother_prepost, tmp_mg[level], omega_opt );
+
+        std::cout << "Optimal omega on level " << level << ": " << omega_opt << std::endl;
+    }
+
+    using CoarseGridSolver = linalg::solvers::PCG< Viscous >;
+
+    std::vector< VectorQ1Vec< ScalarType > > coarse_grid_tmps;
+    for ( int i = 0; i < 4; i++ )
+    {
+        coarse_grid_tmps.emplace_back( "tmp_coarse_grid", domains[0], mask_data[0] );
+    }
+
+    CoarseGridSolver coarse_grid_solver(
+        linalg::solvers::IterativeSolverParameters{ 100, 1e-8, 1e-16 }, table, coarse_grid_tmps );
+
+    constexpr auto num_mg_cycles = 2;
+
+    using PrecVisc = linalg::solvers::Multigrid< Viscous, Prolongation, Restriction, Smoother, CoarseGridSolver >;
+    PrecVisc prec_11(
+        P, R, A_c, tmp_mg_r, tmp_mg_e, tmp_mg, smoothers, smoothers, coarse_grid_solver, num_mg_cycles, 1e-8 );
+
+    // Schur complement: lumped inverse diagonal of pressure mass
+
+    //PrecStokes prec_stokes( K.block_11(), fe::wedge::operators::shell::Identity< ScalarType >(), prec_11, prec_22 );
+    using PressureMass = fe::wedge::operators::shell::Mass< ScalarType >;
+    PressureMass pmass( domains[pressure_level], coords_shell[pressure_level], coords_radii[pressure_level], false );
+    pmass.set_lumped_diagonal( true );
+    VectorQ1Scalar< ScalarType > lumped_diagonal_pmass(
+        "lumped_diagonal_pmass", domains[pressure_level], mask_data[pressure_level] );
+    {
+        VectorQ1Scalar< ScalarType > tmp(
+            "inverse_diagonal_tmp" + std::to_string( pressure_level ),
+            domains[pressure_level],
+            mask_data[pressure_level] );
+        linalg::assign( tmp, 1.0 );
+        linalg::apply( pmass, tmp, lumped_diagonal_pmass );
+    }
+
+    using PrecSchur = linalg::solvers::DiagonalSolver< PressureMass >;
+    PrecSchur inv_lumped_pmass( lumped_diagonal_pmass );
+
+    // setup outer block-preconditioner
+
+    //using PrecStokes =
+    //    linalg::solvers::BlockDiagonalPreconditioner2x2< Stokes, Viscous, PressureMass, PrecVisc, PrecSchur >;
+    //PrecStokes prec_stokes( K.block_11(), pmass, prec_11, inv_lumped_pmass );
+    using PrecStokes = linalg::solvers::
+        BlockTriangularPreconditioner2x2< Stokes, Viscous, PressureMass, Gradient, PrecVisc, PrecSchur >;
+    VectorQ1IsoQ2Q1< ScalarType > triangular_prec_tmp(
+        "triangular_prec_tmp",
+        domains[velocity_level],
+        domains[pressure_level],
+        mask_data[velocity_level],
+        mask_data[pressure_level] );
+
+    PrecStokes prec_stokes( K.block_11(), pmass, K.block_12(), triangular_prec_tmp, prec_11, inv_lumped_pmass );
+
+    linalg::solvers::IterativeSolverParameters solver_params{ 100, 1e-8, 1e-12 };
+
+    constexpr auto                               num_tmps_fgmres = 64;
+    std::vector< VectorQ1IsoQ2Q1< ScalarType > > tmp_fgmres;
+    for ( int i = 0; i < num_tmps_fgmres; ++i )
+    {
+        tmp_fgmres.emplace_back(
+            "tmp_" + std::to_string( i ),
+            domains[velocity_level],
+            domains[pressure_level],
+            mask_data[velocity_level],
+            mask_data[pressure_level] );
+    }
+    linalg::solvers::FGMRES< Stokes, PrecStokes > fgmres( tmp_fgmres, {}, table, prec_stokes );
+    //linalg::solvers::FGMRES< Stokes > fgmres( tmp_fgmres, {}, table );
+
+    std::cout << "Solve ... " << std::endl;
+    linalg::solvers::solve( fgmres, K, u, f );
+
+    const double avg_pressure_solution =
+        kernels::common::masked_sum(
+            solution.block_2().grid_data(), solution.block_2().mask_data(), grid::NodeOwnershipFlag::OWNED ) /
+        num_dofs_pressure;
+    const double avg_pressure_approximation =
+        kernels::common::masked_sum(
+            u.block_2().grid_data(), u.block_2().mask_data(), grid::NodeOwnershipFlag::OWNED ) /
+        num_dofs_pressure;
+
+    linalg::lincomb( solution.block_2(), { 1.0 }, { solution.block_2() }, -avg_pressure_solution );
+    linalg::lincomb( u.block_2(), { 1.0 }, { u.block_2() }, -avg_pressure_approximation );
+
+    linalg::apply( K, u, stok_vecs["tmp_6"] );
+    linalg::lincomb( stok_vecs["tmp_5"], { 1.0, -1.0 }, { f, stok_vecs["tmp_6"] } );
+    const auto inf_residual_vel = linalg::norm_inf( stok_vecs["tmp_5"].block_1() );
+    const auto inf_residual_pre = linalg::norm_inf( stok_vecs["tmp_5"].block_2() );
+
+    linalg::lincomb( error, { 1.0, -1.0 }, { u, solution } );
+    const auto l2_error_velocity =
+        std::sqrt( dot( error.block_1(), error.block_1() ) / static_cast< double >( num_dofs_velocity ) );
+    const auto l2_error_pressure =
+        std::sqrt( dot( error.block_2(), error.block_2() ) / static_cast< double >( num_dofs_pressure ) );
+
+    table->add_row(
+        { { "level", max_level },
+          { "dofs_vel", num_dofs_velocity },
+          { "l2_error_vel", l2_error_velocity },
+          { "dofs_pre", num_dofs_pressure },
+          { "l2_error_pre", l2_error_pressure },
+          { "inf_res_vel", inf_residual_vel },
+          { "inf_res_pre", inf_residual_pre } } );
+
+    return { l2_error_velocity, l2_error_pressure };
+}
+
+int main( int argc, char** argv )
+{
+    util::terra_initialize( &argc, &argv );
+
+    auto table = std::make_shared< util::Table >();
+
+    double prev_l2_error_vel = 1.0;
+    double prev_l2_error_pre = 1.0;
+
+    for ( int level = 1; level < 6; ++level )
+    {
+        std::cout << "level = " << level << std::endl;
+        Kokkos::Timer timer;
+        timer.reset();
+        const auto [l2_error_vel, l2_error_pre] = test( 0, level, table );
+        const auto time_total                   = timer.seconds();
+        table->add_row( { { "level", level }, { "time_total", time_total } } );
+
+        if ( level > 2 )
+        {
+            const double order_vel = prev_l2_error_vel / l2_error_vel;
+            const double order_pre = prev_l2_error_pre / l2_error_pre;
+
+            std::cout << "Level " << level << ": order_vel = " << order_vel << ", l2_error_vel = " << l2_error_vel
+                      << std::endl;
+            std::cout << "Level " << level << ": order_pre = " << order_pre << ", l2_error_pre = " << l2_error_pre
+                      << std::endl;
+
+            table->add_row( { { "level", level }, { "order_vel", order_vel }, { "order_pre", order_pre } } );
+        }
+        prev_l2_error_vel = l2_error_vel;
+        prev_l2_error_pre = l2_error_pre;
+
+        table->query_rows_equals( "tag", "fgmres_solver" ).print_pretty();
+        table->clear();
+    }
+
+    return 0;
+}
