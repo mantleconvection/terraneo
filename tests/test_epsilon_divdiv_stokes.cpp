@@ -518,11 +518,16 @@ std::pair< double, double > test( int min_level, int max_level, const std::share
             mask_data[velocity_level],
             mask_data[pressure_level] );
     }
-    linalg::solvers::FGMRES< Stokes, PrecStokes > fgmres( tmp_fgmres, {}, table, prec_stokes );
+
+    auto                                          solver_table = std::make_shared< util::Table >();
+    linalg::solvers::FGMRES< Stokes, PrecStokes > fgmres( tmp_fgmres, {}, solver_table, prec_stokes );
     //linalg::solvers::FGMRES< Stokes > fgmres( tmp_fgmres, {}, table );
 
     std::cout << "Solve ... " << std::endl;
     linalg::solvers::solve( fgmres, K, u, f );
+    solver_table->query_rows_equals( "tag", "fgmres_solver" )
+        .select_columns( { "absolute_residual", "relative_residual", "iteration" } )
+        .print_pretty();
 
     const double avg_pressure_solution =
         kernels::common::masked_sum(
@@ -577,7 +582,7 @@ int main( int argc, char** argv )
         const auto time_total                   = timer.seconds();
         table->add_row( { { "level", level }, { "time_total", time_total } } );
 
-        if ( level > 2 )
+        if ( level > 1 )
         {
             const double order_vel = prev_l2_error_vel / l2_error_vel;
             const double order_pre = prev_l2_error_pre / l2_error_pre;
@@ -591,10 +596,10 @@ int main( int argc, char** argv )
         }
         prev_l2_error_vel = l2_error_vel;
         prev_l2_error_pre = l2_error_pre;
-
-        table->query_rows_equals( "tag", "fgmres_solver" ).print_pretty();
-        table->clear();
     }
-
+    table->query_rows_not_none( "dofs_vel" )
+        .select_columns( { "level", "dofs_pre", "dofs_vel", "l2_error_pre", "l2_error_vel" } )
+        .print_pretty();
+    table->query_rows_not_none( "order_vel" ).select_columns( { "level", "order_pre", "order_vel" } ).print_pretty();
     return 0;
 }
