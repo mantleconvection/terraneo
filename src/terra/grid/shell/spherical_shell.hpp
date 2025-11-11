@@ -2432,21 +2432,30 @@ class DistributedDomain
         {
             domain.subdomains_[subdomain] = {
                 idx, SubdomainNeighborhood( domain.domain_info_, subdomain, subdomain_to_rank ) };
+            domain.local_subdomain_index_to_subdomain_info_[idx] = subdomain;
             idx++;
         }
         return domain;
     }
 
     /// @brief Returns a const reference
-    const DomainInfo& domain_info() const { return domain_info_; }
-    const std::map< SubdomainInfo, std::tuple< LocalSubdomainIdx, SubdomainNeighborhood > >& subdomains() const
+    [[nodiscard]] const DomainInfo& domain_info() const { return domain_info_; }
+
+    [[nodiscard]] const std::map< SubdomainInfo, std::tuple< LocalSubdomainIdx, SubdomainNeighborhood > >&
+        subdomains() const
     {
         return subdomains_;
+    }
+
+    [[nodiscard]] const SubdomainInfo& subdomain_info_from_local_idx( const LocalSubdomainIdx subdomain_idx ) const
+    {
+        return local_subdomain_index_to_subdomain_info_.at( subdomain_idx );
     }
 
   private:
     DomainInfo                                                                        domain_info_;
     std::map< SubdomainInfo, std::tuple< LocalSubdomainIdx, SubdomainNeighborhood > > subdomains_;
+    std::map< LocalSubdomainIdx, SubdomainInfo > local_subdomain_index_to_subdomain_info_;
 };
 
 template < typename ValueType >

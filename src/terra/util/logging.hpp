@@ -60,11 +60,24 @@ class PrefixCout final : std::streambuf, public std::ostream
     }
 };
 
+inline std::string log_prefix()
+{
+    std::stringstream ss;
+    ss << "[LOG | rank " << std::setw( static_cast< int >( std::to_string( mpi::num_processes() - 1 ).size() ) )
+       << mpi::rank() << " | " << current_timestamp() + "] ";
+    return ss.str();
+}
+
 } // namespace detail
 
 /// @brief std::ostream subclass that just logs on root and adds a timestamp for each line.
 ///
 /// You should be able to use this as a plugin replacement for std::cout.
-inline detail::PrefixCout logroot( []() { return "[LOG | " + current_timestamp() + "] "; } );
+inline detail::PrefixCout logroot( []() { return detail::log_prefix(); } );
+
+/// @brief std::ostream subclass that just logs on any process and adds a timestamp for each line.
+///
+/// You should be able to use this as a plugin replacement for std::cout.
+inline detail::PrefixCout logall( []() { return detail::log_prefix(); }, false );
 
 } // namespace terra::util

@@ -5,6 +5,8 @@
 
 #include "mpi/mpi.hpp"
 #include "util/filesystem.hpp"
+#include "util/logging.hpp"
+#include "util/result.hpp"
 #include "util/xml.hpp"
 
 namespace terra::visualization {
@@ -55,11 +57,13 @@ class XDMFOutput
     /// Does not write any data, yet.
     XDMFOutput(
         const std::string&                                   directory_path,
+        const grid::shell::DistributedDomain&                distributed_domain,
         const grid::Grid3DDataVec< InputGridScalarType, 3 >& coords_shell_device,
         const grid::Grid2DDataScalar< InputGridScalarType >& coords_radii_device,
         const OutputTypeFloat                                output_type_points       = OutputTypeFloat::Float32,
         const OutputTypeInt                                  output_type_connectivity = OutputTypeInt::Int64 )
     : directory_path_( directory_path )
+    , distributed_domain_( distributed_domain )
     , coords_shell_device_( coords_shell_device )
     , coords_radii_device_( coords_radii_device )
     , output_type_points_( output_type_points )
@@ -79,6 +83,11 @@ class XDMFOutput
         add( const grid::Grid4DDataScalar< InputScalarDataType >& data,
              const OutputTypeFloat                                output_type = OutputTypeFloat::Float32 )
     {
+        if ( write_counter_ != 0 )
+        {
+            Kokkos::abort( "XDMF::add(): Cannot add data after write() has been called." );
+        }
+
         check_extents( data );
 
         if ( is_label_taken( data.label() ) )
@@ -110,6 +119,11 @@ class XDMFOutput
         add( const grid::Grid4DDataVec< InputScalarDataType, VecDim >& data,
              const OutputTypeFloat                                     output_type = OutputTypeFloat::Float32 )
     {
+        if ( write_counter_ != 0 )
+        {
+            Kokkos::abort( "XDMF::add(): Cannot add data after write() has been called." );
+        }
+
         check_extents( data );
 
         if ( is_label_taken( data.label() ) )
@@ -149,8 +163,6 @@ class XDMFOutput
     {
         using util::XML;
 
-        util::prepare_empty_directory( directory_path_ );
-
         const auto geometry_file_base = "geometry.bin";
         const auto topology_file_base = "topology.bin";
 
@@ -171,30 +183,34 @@ class XDMFOutput
         {
             // Number of global nodes and elements.
 
-            int num_nodes_elements_global[2] = { number_of_nodes_local, number_of_elements_local };
-            MPI_Allreduce( MPI_IN_PLACE, &num_nodes_elements_global, 2, MPI_INT, MPI_SUM, MPI_COMM_WORLD );
-            number_of_nodes_global_    = num_nodes_elements_global[0];
-            number_of_elements_global_ = num_nodes_elements_global[1];
+            int num_nodes_elements_subdomains_global[3] = {
+                number_of_nodes_local, number_of_elements_local, num_subdomains };
+            MPI_Allreduce( MPI_IN_PLACE, &num_nodes_elements_subdomains_global, 3, MPI_INT, MPI_SUM, MPI_COMM_WORLD );
+            number_of_nodes_global_      = num_nodes_elements_subdomains_global[0];
+            number_of_elements_global_   = num_nodes_elements_subdomains_global[1];
+            number_of_subdomains_global_ = num_nodes_elements_subdomains_global[2];
 
             // Check MPI write offset
 
             // To be populated:
             // First entry: number of nodes of processes before this
             // Second entry: number of elements of processes before this
-            int offsets[2];
+            // Third entry: number of subdomains of processes before this
+            int offsets[3];
 
-            int local_values[2] = { number_of_nodes_local, number_of_elements_local };
+            int local_values[3] = { number_of_nodes_local, number_of_elements_local, num_subdomains };
 
             // Compute the prefix sum (inclusive)
-            MPI_Scan( &local_values, &offsets, 2, MPI_INT, MPI_SUM, MPI_COMM_WORLD );
+            MPI_Scan( &local_values, &offsets, 3, MPI_INT, MPI_SUM, MPI_COMM_WORLD );
 
             // Subtract the local value to get the sum of all values from processes with ranks < current rank
-            number_of_nodes_offset_    = offsets[0] - local_values[0];
-            number_of_elements_offset_ = offsets[1] - local_values[1];
+            number_of_nodes_offset_      = offsets[0] - local_values[0];
+            number_of_elements_offset_   = offsets[1] - local_values[1];
+            number_of_subdomains_offset_ = offsets[2] - local_values[2];
 
-            // Create directory on root
+            // Create a directory on root
 
-            // TODO
+            util::prepare_empty_directory( directory_path_ );
 
             // Add a README to the directory (what to keep, what the data contains, some notes on how to use paraview).
 
@@ -266,6 +282,11 @@ class XDMFOutput
 
                 // Close the file
                 MPI_File_close( &fh );
+            }
+
+            // Checkpoint metadata
+            {
+                write_checkpoint_metadata();
             }
         }
 
@@ -725,7 +746,225 @@ class XDMFOutput
         return attribute;
     }
 
+    /// Format (required once per series):
+    ///
+    /// @code
+    /// version:                                      i32
+    /// num_subdomains_per_diamond_lateral_direction: i32
+    /// num_subdomains_per_diamond_radial_direction:  i32
+    /// subdomain_size_x:                             i32
+    /// subdomain_size_y:                             i32
+    /// subdomain_size_r:                             i32
+    /// radii:                                        array: f64, entries: num_subdomains_per_diamond_radial_direction * (subdomain_size_r - 1) + 1
+    /// num_grid_data_files:                          i32
+    /// list (size = num_grid_data_files)
+    /// [
+    ///     grid_name_string_size_bytes:              i32
+    ///     grid_name_string:                         grid_name_string_size_bytes * 8
+    ///     scalar_data_type:                         i32 // 0: signed integer, 1: unsigned integer, 2: float
+    ///     scalar_bytes:                             i32
+    ///     vec_dim:                                  i32
+    /// ]
+    /// checkpoint_subdomain_ordering:                i32
+    /// if (checkpoint_subdomain_ordering == 0) {
+    ///     // The following list contains the encoded global_subdomain_ids (as i64) in the order in which the
+    ///     // subdomains are written to the data files. To find out where a certain subdomain is located in the
+    ///     // file, the starting offset must be set equal to the index of the global_subdomain_id in the list below,
+    ///     // multiplied by the size of a single chunk of data per subdomain.
+    ///     // That means that in the worst case, the entire list must be read to find the correct subdomain.
+    ///     // However, this way it is easy to _write_ the metadata since we do not need to globally sort the subdomain
+    ///     // positions in the parallel setting, and we get away with O(1) local memory usage during parsing.
+    ///     // Lookup is O(n), though.
+    ///     //
+    ///     // An alternative would be to sort the list before writing the checkpoint and store the _position of the
+    ///     // subdomain data_ instead of the global_subdomain_id. Since the global_subdomain_id is sortable, an
+    ///     // implicit mapping from global_subdomain_id to this list's index can be accomplished.
+    ///     // Then look up the position of the data in O(1).
+    ///     // However, that would require reducing the entire list on one process which is in theory not scalable
+    ///     // (plus the sorting approach is a tiny bit more complicated).
+    ///     // Use a different value for checkpoint_subdomain_ordering in that case and extend the file format.
+    ///     list (size = "num_global_subdomains" = 10 * num_subdomains_per_diamond_lateral_direction * num_subdomains_per_diamond_lateral_direction * num_subdomains_per_diamond_radial_direction)
+    ///     [
+    ///         global_subdomain_id: i64
+    ///     ]
+    /// }
+    /// @endcode
+    ///
+    /// @note Must be called collectively by all processes.
+    ///
+    void write_checkpoint_metadata()
+    {
+        const auto checkpoint_metadata_file_path = directory_path_ + "/" + "checkpoint_metadata.bin";
+
+        std::stringstream checkpoint_metadata_stream;
+
+        auto write_i32 = [&]( const int32_t value ) {
+            checkpoint_metadata_stream.write( reinterpret_cast< const char* >( &value ), sizeof( int32_t ) );
+        };
+
+        auto write_i64 = [&]( const int64_t value ) {
+            checkpoint_metadata_stream.write( reinterpret_cast< const char* >( &value ), sizeof( int64_t ) );
+        };
+
+        auto write_f64 = [&]( const double value ) {
+            checkpoint_metadata_stream.write( reinterpret_cast< const char* >( &value ), sizeof( double ) );
+        };
+
+        write_i32( 0 ); // version
+        write_i32( distributed_domain_.domain_info().num_subdomains_per_diamond_side() );
+        write_i32( distributed_domain_.domain_info().num_subdomains_in_radial_direction() );
+
+        write_i32( coords_shell_device_.extent( 1 ) ); // subdomain_size_x
+        write_i32( coords_shell_device_.extent( 2 ) ); // subdomain_size_y
+        write_i32( coords_radii_device_.extent( 1 ) ); // subdomain_size_r
+
+        for ( const auto r : distributed_domain_.domain_info().radii() )
+        {
+            write_f64( static_cast< double >( r ) );
+        }
+
+        write_i32(
+            device_data_views_scalar_float_.size() + device_data_views_scalar_double_.size() +
+            device_data_views_vec_float_.size() + device_data_views_vec_double_.size() );
+
+        for ( const auto& [data, output_type] : device_data_views_scalar_float_ )
+        {
+            write_i32( data.label().size() );
+            checkpoint_metadata_stream.write( data.label().data(), data.label().size() );
+            write_i32( 2 ); // scalar_data_type
+            if ( output_type == OutputTypeFloat::Float32 )
+            {
+                write_i32( sizeof( float ) );
+            }
+            else if ( output_type == OutputTypeFloat::Float64 )
+            {
+                write_i32( sizeof( double ) );
+            }
+            else
+            {
+                Kokkos::abort( "Invalid output type." );
+            }
+
+            write_i32( 1 ); // vec_dim
+        }
+
+        for ( const auto& [data, output_type] : device_data_views_scalar_double_ )
+        {
+            write_i32( data.label().size() );
+            checkpoint_metadata_stream.write( data.label().data(), data.label().size() );
+            write_i32( 2 ); // scalar_data_type
+            if ( output_type == OutputTypeFloat::Float32 )
+            {
+                write_i32( sizeof( float ) );
+            }
+            else if ( output_type == OutputTypeFloat::Float64 )
+            {
+                write_i32( sizeof( double ) );
+            }
+            else
+            {
+                Kokkos::abort( "Invalid output type." );
+            }
+            write_i32( 1 ); // vec_dim
+        }
+
+        for ( const auto& [data, output_type] : device_data_views_vec_float_ )
+        {
+            write_i32( data.label().size() );
+            checkpoint_metadata_stream.write( data.label().data(), data.label().size() );
+            write_i32( 2 ); // scalar_data_type
+            if ( output_type == OutputTypeFloat::Float32 )
+            {
+                write_i32( sizeof( float ) );
+            }
+            else if ( output_type == OutputTypeFloat::Float64 )
+            {
+                write_i32( sizeof( double ) );
+            }
+            else
+            {
+                Kokkos::abort( "Invalid output type." );
+            }
+            write_i32( data.extent( 4 ) ); // vec_dim
+        }
+
+        for ( const auto& [data, output_type] : device_data_views_vec_double_ )
+        {
+            write_i32( data.label().size() );
+            checkpoint_metadata_stream.write( data.label().data(), data.label().size() );
+            write_i32( 2 ); // scalar_data_type
+            if ( output_type == OutputTypeFloat::Float32 )
+            {
+                write_i32( sizeof( float ) );
+            }
+            else if ( output_type == OutputTypeFloat::Float64 )
+            {
+                write_i32( sizeof( double ) );
+            }
+            else
+            {
+                Kokkos::abort( "Invalid output type." );
+            }
+            write_i32( data.extent( 4 ) ); // vec_dim
+        }
+
+        write_i32( 0 ); // checkpoint_subdomain_ordering
+
+        // for ( int local_subdomain_id = 0; local_subdomain_id < coords_shell_device_.extent( 0 ); local_subdomain_id++ )
+        // {
+        //     write_i64( distributed_domain_.subdomain_info_from_local_idx( local_subdomain_id ).global_id() );
+        // }
+
+        MPI_File fh;
+        MPI_File_open(
+            MPI_COMM_WORLD,
+            checkpoint_metadata_file_path.c_str(),
+            MPI_MODE_CREATE | MPI_MODE_RDWR,
+            MPI_INFO_NULL,
+            &fh );
+
+        // Define the file view: each process writes its local data sequentially
+        MPI_Offset disp                       = 0;
+        const auto offset_metadata_size_bytes = static_cast< int >( checkpoint_metadata_stream.str().size() );
+        if ( mpi::rank() != 0 )
+        {
+            // We'll write the global metadata just via rank 0.
+            // Next up: each process writes the global subdomain IDs of their local subdomains in parallel.
+            // We have previously also filled the stream with the global metadata on non-root processes to facilitate
+            // computing its length (we need to know where to start writing).
+            // After computing its length and before writing the subdomain ids we clear the stream here.
+            disp = offset_metadata_size_bytes + number_of_subdomains_offset_ * sizeof( int64_t );
+            checkpoint_metadata_stream.clear();
+            checkpoint_metadata_stream.str( "" );
+        }
+
+        // Writing the global subdomain ids of the local subdomains now in contiguous chunks per process.
+        // Must be the order of the local_subdomain_id here to adhere to the ordering of the data output (which also
+        // writes in that order).
+        for ( int local_subdomain_id = 0; local_subdomain_id < coords_shell_device_.extent( 0 ); local_subdomain_id++ )
+        {
+            write_i64( distributed_domain_.subdomain_info_from_local_idx( local_subdomain_id ).global_id() );
+        }
+
+        MPI_File_set_view( fh, disp, MPI_CHAR, MPI_CHAR, "native", MPI_INFO_NULL );
+
+        std::string checkpoint_metadata_str = checkpoint_metadata_stream.str();
+
+        // Write data collectively
+        MPI_File_write_all(
+            fh,
+            checkpoint_metadata_str.data(),
+            static_cast< int >( checkpoint_metadata_str.size() ),
+            MPI_CHAR,
+            MPI_STATUS_IGNORE );
+
+        // Close the file
+        MPI_File_close( &fh );
+    }
+
     std::string directory_path_;
+
+    grid::shell::DistributedDomain distributed_domain_;
 
     grid::Grid3DDataVec< InputGridScalarType, 3 > coords_shell_device_;
     grid::Grid2DDataScalar< InputGridScalarType > coords_radii_device_;
@@ -749,11 +988,385 @@ class XDMFOutput
 
     int write_counter_ = 0;
 
-    int number_of_nodes_offset_    = -1;
-    int number_of_elements_offset_ = -1;
+    int number_of_nodes_offset_      = -1;
+    int number_of_elements_offset_   = -1;
+    int number_of_subdomains_offset_ = -1;
 
-    int number_of_nodes_global_    = -1;
-    int number_of_elements_global_ = -1;
+    int number_of_nodes_global_      = -1;
+    int number_of_elements_global_   = -1;
+    int number_of_subdomains_global_ = -1;
 };
+
+/// Captures the format of the checkpoint metadata.
+struct CheckpointMetadata
+{
+    int32_t version{};
+    int32_t num_subdomains_per_diamond_lateral_direction{};
+    int32_t num_subdomains_per_diamond_radial_direction{};
+    int32_t size_x{};
+    int32_t size_y{};
+    int32_t size_r{};
+
+    std::vector< double > radii;
+
+    struct GridDataFile
+    {
+        std::string grid_name_string;
+        int32_t     scalar_data_type{};
+        int32_t     scalar_bytes{};
+        int32_t     vec_dim{};
+    };
+
+    std::vector< GridDataFile > grid_data_files;
+
+    int32_t checkpoint_subdomain_ordering{};
+
+    std::vector< int64_t > checkpoint_ordering_0_global_subdomain_ids;
+};
+
+[[nodiscard]] inline util::Result< CheckpointMetadata >
+    read_checkpoint_metadata( const std::string& checkpoint_directory )
+{
+    const auto metadata_file = checkpoint_directory + "/" + "checkpoint_metadata.bin";
+
+    if ( !std::filesystem::exists( metadata_file ) )
+    {
+        return { "Could not find file: " + metadata_file };
+    }
+
+    MPI_File fh;
+    MPI_File_open( MPI_COMM_WORLD, metadata_file.c_str(), MPI_MODE_RDONLY, MPI_INFO_NULL, &fh );
+    MPI_Offset filesize;
+    MPI_File_get_size( fh, &filesize );
+
+    std::vector< char > buffer( filesize );
+    MPI_File_read_all( fh, buffer.data(), filesize, MPI_BYTE, MPI_STATUS_IGNORE );
+    MPI_File_close( &fh );
+
+    std::string data( buffer.data(), buffer.size() );
+
+    std::istringstream in( data, std::ios::binary );
+
+    auto read_i32 = [&]( int32_t& value ) {
+        in.read( reinterpret_cast< char* >( &value ), sizeof( value ) );
+        if ( !in )
+        {
+            return 1;
+        }
+        return 0;
+    };
+
+    auto read_i64 = [&]( int64_t& value ) {
+        in.read( reinterpret_cast< char* >( &value ), sizeof( value ) );
+        if ( !in )
+        {
+            return 1;
+        }
+        return 0;
+    };
+
+    auto read_f64 = [&]( double& value ) {
+        in.read( reinterpret_cast< char* >( &value ), sizeof( value ) );
+        if ( !in )
+        {
+            return 1;
+        }
+        return 0;
+    };
+
+    const std::string read_error = "Failed to read from input stream.";
+
+    CheckpointMetadata metadata;
+
+    if ( read_i32( metadata.version ) )
+        return read_error;
+    if ( read_i32( metadata.num_subdomains_per_diamond_lateral_direction ) )
+        return read_error;
+    if ( read_i32( metadata.num_subdomains_per_diamond_radial_direction ) )
+        return read_error;
+    if ( read_i32( metadata.size_x ) )
+        return read_error;
+    if ( read_i32( metadata.size_y ) )
+        return read_error;
+    if ( read_i32( metadata.size_r ) )
+        return read_error;
+
+    for ( int i = 0; i < metadata.num_subdomains_per_diamond_radial_direction * ( metadata.size_r - 1 ) + 1; i++ )
+    {
+        double r;
+        if ( read_f64( r ) )
+            return read_error;
+
+        if ( i > 0 && r <= metadata.radii.back() )
+        {
+            return { "Radii are not sorted correctly in checkpoint." };
+        }
+
+        metadata.radii.push_back( r );
+    }
+
+    int32_t num_grid_data_files;
+    if ( read_i32( num_grid_data_files ) )
+        return read_error;
+
+    metadata.grid_data_files.resize( num_grid_data_files );
+    for ( auto& [grid_name_string, scalar_data_type, scalar_bytes, vec_dim] : metadata.grid_data_files )
+    {
+        int32_t grid_name_string_size_bytes;
+        if ( read_i32( grid_name_string_size_bytes ) )
+            return read_error;
+
+        grid_name_string = std::string( grid_name_string_size_bytes, '\0' );
+        in.read( &grid_name_string[0], grid_name_string_size_bytes );
+        if ( !in )
+            return read_error;
+
+        if ( read_i32( scalar_data_type ) )
+            return read_error;
+        if ( read_i32( scalar_bytes ) )
+            return read_error;
+        if ( read_i32( vec_dim ) )
+            return read_error;
+    }
+
+    if ( read_i32( metadata.checkpoint_subdomain_ordering ) )
+        return read_error;
+
+    if ( metadata.checkpoint_subdomain_ordering == 0 )
+    {
+        const auto num_global_subdomains = 10 * metadata.num_subdomains_per_diamond_lateral_direction *
+                                           metadata.num_subdomains_per_diamond_lateral_direction *
+                                           metadata.num_subdomains_per_diamond_radial_direction;
+
+        metadata.checkpoint_ordering_0_global_subdomain_ids.resize( num_global_subdomains );
+        for ( auto& global_subdomain_id : metadata.checkpoint_ordering_0_global_subdomain_ids )
+        {
+            if ( read_i64( global_subdomain_id ) )
+                return read_error + " (global_subdomain_id reading error)";
+        }
+    }
+
+    return metadata;
+}
+
+template < typename GridDataType >
+[[nodiscard]] util::Result<> read_checkpoint(
+    const std::string&                    checkpoint_directory,
+    const std::string&                    data_label,
+    const int                             step,
+    const grid::shell::DistributedDomain& distributed_domain,
+    GridDataType&                         grid_data_device )
+{
+    auto checkpoint_metadata_result = read_checkpoint_metadata( checkpoint_directory );
+
+    if ( checkpoint_metadata_result.is_err() )
+    {
+        return "Could not read checkpoint metadata: " + checkpoint_metadata_result.error();
+    }
+
+    const auto& checkpoint_metadata = checkpoint_metadata_result.unwrap();
+
+    if ( checkpoint_metadata.version != 0 )
+    {
+        return { "Checkpoint version other than 0 is not supported." };
+    }
+
+    // Check whether we have checkpoint metadata for the requested data label.
+
+    std::optional< CheckpointMetadata::GridDataFile > requested_grid_data_file;
+    for ( const auto& grid_data_file : checkpoint_metadata.grid_data_files )
+    {
+        if ( grid_data_file.grid_name_string == data_label )
+        {
+            requested_grid_data_file = grid_data_file;
+            break;
+        }
+    }
+
+    if ( !requested_grid_data_file.has_value() )
+    {
+        return { "Could not find requested data (" + data_label + ") in checkpoint" };
+    }
+
+    // Check if we can also find a binary data file in the checkpoint directory.
+
+    const auto data_file_path = checkpoint_directory + "/" + data_label + "_" + std::to_string( step ) + ".bin";
+
+    if ( !std::filesystem::exists( data_file_path ) )
+    {
+        return { "Could not find checkpoint data file for requested label and step." };
+    }
+
+    // Now we compare the grid extents with the metadata.
+
+    if ( grid_data_device.extent( 1 ) != checkpoint_metadata.size_x ||
+         grid_data_device.extent( 2 ) != checkpoint_metadata.size_y ||
+         grid_data_device.extent( 3 ) != checkpoint_metadata.size_r )
+    {
+        return { "Grid data extents do not match metadata." };
+    }
+
+    // Let's try to read now.
+    // We will attempt to read all chunks for the local subdomains (that are possibly distributed in the file)
+    // into one array. In a second step we'll copy that into our grid data. That is not 100% memory efficient as we
+    // have another copy (the buffer). We could write directly with the std library, but I am not sure if that is
+    // scalable.
+
+    if ( checkpoint_metadata.checkpoint_subdomain_ordering != 0 )
+    {
+        return { "Checkpoint ordering type is not 0. Not supported." };
+    }
+
+    // Figure out where the subdomain data is positioned in the file.
+
+    const auto num_local_subdomains = grid_data_device.extent( 0 );
+
+    const auto local_subdomain_num_scalars_v = checkpoint_metadata.size_x * checkpoint_metadata.size_y *
+                                               checkpoint_metadata.size_r * requested_grid_data_file.value().vec_dim;
+
+    const auto local_subdomain_data_size_in_bytes =
+        local_subdomain_num_scalars_v * requested_grid_data_file.value().scalar_bytes;
+
+    std::vector< MPI_Aint > local_subdomain_offsets_in_file_bytes( num_local_subdomains );
+    std::vector< int >      local_subdomain_num_bytes( num_local_subdomains, local_subdomain_data_size_in_bytes );
+
+    for ( int local_subdomain_id = 0; local_subdomain_id < num_local_subdomains; local_subdomain_id++ )
+    {
+        const auto global_subdomain_id =
+            distributed_domain.subdomain_info_from_local_idx( local_subdomain_id ).global_id();
+
+        const auto index_in_file =
+            std::ranges::find( checkpoint_metadata.checkpoint_ordering_0_global_subdomain_ids, global_subdomain_id ) -
+            checkpoint_metadata.checkpoint_ordering_0_global_subdomain_ids.begin();
+
+        local_subdomain_offsets_in_file_bytes[local_subdomain_id] = index_in_file * local_subdomain_data_size_in_bytes;
+    }
+
+    // Read with MPI
+
+    std::vector< char > buffer( num_local_subdomains * local_subdomain_data_size_in_bytes );
+
+    MPI_File fh;
+    MPI_File_open( MPI_COMM_WORLD, data_file_path.c_str(), MPI_MODE_RDONLY, MPI_INFO_NULL, &fh );
+
+    MPI_Datatype filetype;
+    MPI_Type_create_hindexed(
+        num_local_subdomains,
+        local_subdomain_num_bytes.data(),
+        local_subdomain_offsets_in_file_bytes.data(),
+        MPI_CHAR,
+        &filetype );
+    MPI_Type_commit( &filetype );
+
+    // Set each rank’s view of the file to its own scattered layout
+    MPI_File_set_view( fh, 0, MPI_CHAR, filetype, "native", MPI_INFO_NULL );
+
+    MPI_File_read_all( fh, buffer.data(), buffer.size(), MPI_CHAR, MPI_STATUS_IGNORE );
+
+    MPI_Type_free( &filetype );
+    MPI_File_close( &fh );
+
+    // Now write from buffer to grid.
+
+    typename GridDataType::HostMirror grid_data_host =
+        Kokkos::create_mirror_view( Kokkos::HostSpace{}, grid_data_device );
+
+    const auto checkpoint_is_float =
+        requested_grid_data_file.value().scalar_data_type == 2 && requested_grid_data_file.value().scalar_bytes == 4;
+    const auto checkpoint_is_double =
+        requested_grid_data_file.value().scalar_data_type == 2 && requested_grid_data_file.value().scalar_bytes == 8;
+
+    if ( !( checkpoint_is_float || checkpoint_is_double ) )
+    {
+        return { "Unsupported data type in checkpoint." };
+    }
+
+    // Wrap vector in a stream
+    std::string_view   view( reinterpret_cast< const char* >( buffer.data() ), buffer.size() );
+    std::istringstream stream{ std::string( view ) }; // make a copy to own the buffer
+
+    auto read_f32 = [&]() -> float {
+        float value;
+        stream.read( reinterpret_cast< char* >( &value ), sizeof( float ) );
+        if ( stream.fail() )
+        {
+            Kokkos::abort( "Failed to read from stream." );
+        }
+        return value;
+    };
+
+    auto read_f64 = [&]() -> double {
+        double value;
+        stream.read( reinterpret_cast< char* >( &value ), sizeof( double ) );
+        if ( stream.fail() )
+        {
+            Kokkos::abort( "Failed to read from stream." );
+        }
+        return value;
+    };
+
+    for ( int local_subdomain_id = 0; local_subdomain_id < grid_data_host.extent( 0 ); local_subdomain_id++ )
+    {
+        for ( int r = 0; r < grid_data_host.extent( 3 ); r++ )
+        {
+            for ( int y = 0; y < grid_data_host.extent( 2 ); y++ )
+            {
+                for ( int x = 0; x < grid_data_host.extent( 1 ); x++ )
+                {
+                    if constexpr (
+                        std::is_same_v< GridDataType, grid::Grid4DDataScalar< float > > ||
+                        std::is_same_v< GridDataType, grid::Grid4DDataScalar< double > > )
+                    {
+                        if ( requested_grid_data_file.value().vec_dim != 1 )
+                        {
+                            return { "Checkpoint is scalar, passed grid data view dims do not match." };
+                        }
+
+                        // scalar data
+                        if ( checkpoint_is_float )
+                        {
+                            grid_data_host( local_subdomain_id, x, y, r ) =
+                                static_cast< GridDataType::value_type >( read_f32() );
+                        }
+                        else if ( checkpoint_is_double )
+                        {
+                            grid_data_host( local_subdomain_id, x, y, r ) =
+                                static_cast< GridDataType::value_type >( read_f64() );
+                        }
+                    }
+                    else if constexpr (
+                        std::is_same_v< GridDataType, grid::Grid4DDataVec< float, 3 > > ||
+                        std::is_same_v< GridDataType, grid::Grid4DDataVec< double, 3 > > )
+                    {
+                        if ( requested_grid_data_file.value().vec_dim != 3 )
+                        {
+                            return { "Checkpoint is vector-valued, passed grid data view dims do not match." };
+                        }
+
+                        // vector-valued data
+                        for ( int d = 0; d < grid_data_host.extent( 4 ); d++ )
+                        {
+                            if ( checkpoint_is_float )
+                            {
+                                grid_data_host( local_subdomain_id, x, y, r, d ) =
+                                    static_cast< GridDataType::value_type >( read_f32() );
+                            }
+                            else if ( checkpoint_is_double )
+                            {
+                                grid_data_host( local_subdomain_id, x, y, r, d ) =
+                                    static_cast< GridDataType::value_type >( read_f64() );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Kokkos::deep_copy( grid_data_device, grid_data_host );
+    Kokkos::fence();
+
+    return { util::Ok{} };
+}
 
 } // namespace terra::visualization
