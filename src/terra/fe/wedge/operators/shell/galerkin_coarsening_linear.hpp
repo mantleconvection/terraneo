@@ -31,14 +31,14 @@ class TwoGridGCA
 
   private:
     grid::shell::DistributedDomain&    domain_fine_;
+    Operator                           fine_op_;
+    Operator                           coarse_op_;
     grid::Grid3DDataVec< ScalarT, 3 >& grid_fine_;
     grid::Grid2DDataScalar< ScalarT >& radii_fine_;
     grid::Grid2DDataScalar< ScalarT >& radii_coarse_;
-    Operator&                          fine_op_;
-    Operator&                          coarse_op_;
-    bool                               treat_boundary_;
     int                                dimi_ = 0;
     int                                dimj_ = 0;
+    bool                               treat_boundary_;
 
   public:
     explicit TwoGridGCA( Operator fine_op, Operator coarse_op, int dimi = 0, int dimj = 0, bool treat_boundary = true )
@@ -132,11 +132,13 @@ class TwoGridGCA
             { 0, 1, 1, 1 },
         };
 
-        dense::Vec< int, 4 > coarse_hex_idx      = { local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx };
+        dense::Vec< int, 4 > coarse_hex_idx = { local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx };
+        (void) coarse_hex_idx; // unused
+
         dense::Vec< int, 4 > coarse_hex_idx_fine = {
             local_subdomain_id, 2 * x_coarse_idx, 2 * y_coarse_idx, 2 * r_coarse_idx };
 
-        dense::Mat< ScalarT, 6, 6 > A_coarse[num_wedges_per_hex_cell] = { { 0 }, { 0 } };
+        dense::Mat< ScalarT, 6, 6 > A_coarse[num_wedges_per_hex_cell] = {};
         // loop finer hexes of our coarse hex
         for ( int fine_hex_lidx = 0; fine_hex_lidx < 8; fine_hex_lidx++ )
         {
@@ -145,7 +147,7 @@ class TwoGridGCA
             // two wedges per fine hex
             for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
             {
-                dense::Mat< ScalarT, 6, 6 > P = { 0 };
+                dense::Mat< ScalarT, 6, 6 > P = {};
 
                 // obtain vertex indices of the current fine wedge
                 dense::Vec< int, 4 > wedge_local_vertex_indices_fine[6];
@@ -171,6 +173,7 @@ class TwoGridGCA
                                                       fine_dof_idx( 3 ) / 2 :
                                                       fine_dof_idx( 3 ) / 2 - 1;
                     const auto r_idx_coarse_top = r_idx_coarse_bot + 1;
+                    (void) r_idx_coarse_top; // unused
 
                     // fine dof is radially aligned: x and y index match with coarse DoFs
                     // interpolate on the line in radial direction (coarse DoF bot -- fine DoF -- coarse DoF top)
@@ -374,8 +377,8 @@ class TwoGridGCA
         }
         else
         {
-            coarse_op_.set_lmatrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 0, A_coarse[0]);
-            coarse_op_.set_lmatrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 1, A_coarse[1]);
+            coarse_op_.set_lmatrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 0, A_coarse[0] );
+            coarse_op_.set_lmatrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 1, A_coarse[1] );
         }
     }
 };

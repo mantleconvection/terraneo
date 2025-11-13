@@ -34,6 +34,7 @@
 #include "terra/visualization/vtk.hpp"
 #include "util/init.hpp"
 #include "util/table.hpp"
+#include "visualization/xdmf.hpp"
 
 using namespace terra;
 
@@ -353,8 +354,8 @@ std::tuple< double, double, int > test( int min_level, int max_level, const std:
         VectorQ1Scalar< ScalarType > k_c( "k_c", domains[level - min_level], mask_data[level - min_level] );
         Kokkos::parallel_for(
             "coefficient interpolation",
-            local_domain_md_range_policy_nodes( domains[velocity_level] ),
-            KInterpolator( coords_shell[velocity_level], coords_radii[velocity_level], k_c.grid_data() ) );
+            local_domain_md_range_policy_nodes( domains[level - min_level] ),
+            KInterpolator( coords_shell[level - min_level], coords_radii[level - min_level], k_c.grid_data() ) );
         A_diag.emplace_back( domains[level], coords_shell[level], coords_radii[level], k_c.grid_data(), true, true );
 
         if ( level < num_levels - 1 )
@@ -625,6 +626,15 @@ std::tuple< double, double, int > test( int min_level, int max_level, const std:
           { "inf_res_vel", inf_residual_vel },
           { "inf_res_pre", inf_residual_pre } } );
 
+    visualization::XDMFOutput xdmf(
+        "out_eps", domains[velocity_level], coords_shell[velocity_level], coords_radii[velocity_level] );
+
+    xdmf.add( k.grid_data() );
+    xdmf.add( u.block_1().grid_data() );
+    xdmf.add( solution.block_1().grid_data() );
+
+    xdmf.write();
+
     return {
         l2_error_velocity, l2_error_pressure, solver_table->query_rows_equals( "tag", "fgmres_solver" ).rows().size() };
 }
@@ -633,7 +643,7 @@ int main( int argc, char** argv )
 {
     util::terra_initialize( &argc, &argv );
 
-    const int max_level = 5;
+    const int max_level = 4;
     auto      table     = std::make_shared< util::Table >();
 
     double prev_l2_error_vel = 1.0;

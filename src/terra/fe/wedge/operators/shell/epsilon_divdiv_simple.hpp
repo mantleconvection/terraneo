@@ -92,7 +92,7 @@ class EpsilonDivDivSimple
         const int r_cell,
         const int wedge,
         const int dimi,
-        const int dimj )
+        const int dimj ) const
     {
         assert( lmatrices_.data() != nullptr );
         dense::Mat< ScalarT, 6, 6 > ijslice;
@@ -117,7 +117,7 @@ class EpsilonDivDivSimple
         const int                   wedge,
         const int                   dimi,
         const int                   dimj,
-        dense::Mat< ScalarT, 6, 6 > mat )
+        dense::Mat< ScalarT, 6, 6 > mat ) const
     {
         assert( lmatrices_.data() != nullptr );
         for ( int i = 0; i < 6; ++i )

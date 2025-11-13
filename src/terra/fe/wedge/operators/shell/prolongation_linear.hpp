@@ -105,6 +105,7 @@ class ProlongationLinear
         operator()( const int local_subdomain_id, const int x_fine, const int y_fine, const int r_fine ) const
     {
         dense::Vec< int, 4 > fine_hex_fine = { local_subdomain_id, x_fine, y_fine, r_fine };
+        (void) fine_hex_fine; // unused
 
         if ( x_fine % 2 == 0 && y_fine % 2 == 0 && r_fine % 2 == 0 )
         {
@@ -283,6 +284,7 @@ class ProlongationVecLinear
         for ( int dim = 0; dim < 3; ++dim )
         {
             dense::Vec< int, 4 > fine_hex_fine = { local_subdomain_id, x_fine, y_fine, r_fine };
+            (void) fine_hex_fine; // unused
 
             if ( x_fine % 2 == 0 && y_fine % 2 == 0 && r_fine % 2 == 0 )
             {
