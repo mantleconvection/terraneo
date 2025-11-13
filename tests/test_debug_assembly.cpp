@@ -7,8 +7,8 @@
 #include "linalg/util/debug_sparse_assembly.hpp"
 #include "terra/grid/grid_types.hpp"
 #include "terra/grid/shell/spherical_shell.hpp"
+#include "terra/io/vtk.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
-#include "terra/visualization/vtk.hpp"
 #include "util/init.hpp"
 
 using namespace terra;

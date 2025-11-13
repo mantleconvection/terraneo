@@ -4,8 +4,8 @@
 #include <optional>
 
 #include "terra/grid/shell/spherical_shell.hpp"
-#include "terra/visualization/vtk.hpp"
-#include "terra/visualization/xdmf.hpp"
+#include "terra/io/vtk.hpp"
+#include "terra/io/xdmf.hpp"
 #include "util/filesystem.hpp"
 #include "util/init.hpp"
 

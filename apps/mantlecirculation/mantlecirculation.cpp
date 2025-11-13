@@ -17,6 +17,7 @@
 #include "fe/wedge/operators/shell/vector_mass.hpp"
 #include "grid/grid_types.hpp"
 #include "grid/shell/spherical_shell.hpp"
+#include "io/xdmf.hpp"
 #include "kernels/common/grid_operations.hpp"
 #include "kokkos/kokkos_wrapper.hpp"
 #include "linalg/solvers/block_preconditioner_2x2.hpp"
@@ -33,7 +34,6 @@
 #include "util/result.hpp"
 #include "util/table.hpp"
 #include "util/timer.hpp"
-#include "visualization/xdmf.hpp"
 
 using ScalarType = double;
 

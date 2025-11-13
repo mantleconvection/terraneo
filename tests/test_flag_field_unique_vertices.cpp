@@ -1,10 +1,10 @@
+#include "io/xdmf.hpp"
 #include "kernels/common/grid_operations.hpp"
 #include "linalg/vector_q1.hpp"
 #include "terra/grid/shell/spherical_shell.hpp"
-#include "terra/visualization/vtk.hpp"
+#include "terra/io/vtk.hpp"
 #include "util/filesystem.hpp"
 #include "util/init.hpp"
-#include "visualization/xdmf.hpp"
 
 /// For dot products to work correctly, we need to properly define vertex ownership.
 /// Neighboring subdomains share vertices, and to uniquely mark them, we create a mask View, that is either 1 or 0
