@@ -125,7 +125,7 @@ int main( int argc, char** argv )
 
     terra::util::prepare_empty_directory( "test_xdmf_writer_output" );
 
-    terra::io::XDMFOutput xdmf( "test_xdmf_writer_output", subdomain_shell_coords, subdomain_radii );
+    terra::io::XDMFOutput xdmf( "test_xdmf_writer_output", domain, subdomain_shell_coords, subdomain_radii );
     xdmf.add( data_scalar.grid_data() );
     xdmf.add( data_vec.grid_data() );
     xdmf.add( rank );

@@ -227,7 +227,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     if ( true )
     {
-        io::XDMFOutput< double > xdmf( ".", coords_shell, coords_radii );
+        io::XDMFOutput< double > xdmf( ".", domain, coords_shell, coords_radii );
         xdmf.add( g.grid_data() );
         xdmf.add( u.grid_data() );
         // xdmf.add( k.grid_data() );

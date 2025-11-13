@@ -151,7 +151,7 @@ void test( int level, const std::shared_ptr< util::Table >& table )
 
     const int timesteps = 10;
 
-    visualization::XDMFOutput xdmf_output( ".", subdomain_shell_coords, subdomain_radii );
+    io::XDMFOutput xdmf_output( ".", domain, subdomain_shell_coords, subdomain_radii );
     xdmf_output.add( T.grid_data() );
 
     constexpr auto vtk = false;

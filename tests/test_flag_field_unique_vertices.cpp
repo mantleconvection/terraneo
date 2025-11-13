@@ -117,7 +117,7 @@ void test( const int level, const int subdomain_level )
     const auto xdmf_dir = "test_flag_field_unique_vertices_out";
     terra::util::prepare_empty_directory( xdmf_dir );
 
-    terra::io::XDMFOutput xdmf( xdmf_dir, coords_lat, coords_rad );
+    terra::io::XDMFOutput xdmf( xdmf_dir, domain, coords_lat, coords_rad );
     xdmf.add( mask_data_double );
     xdmf.add( ones_comm );
     xdmf.add( grid_diamond_id );

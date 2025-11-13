@@ -7,6 +7,7 @@
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/operators/shell/galerkin_coarsening_linear.hpp"
 #include "fe/wedge/operators/shell/laplace.hpp"
+#include "fe/wedge/operators/shell/laplace_simple.hpp"
 #include "fe/wedge/operators/shell/prolongation_constant.hpp"
 #include "fe/wedge/operators/shell/restriction_constant.hpp"
 #include "linalg/solvers/jacobi.hpp"
@@ -171,13 +172,7 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
             "tmp_smoothers_level_" + std::to_string( level ), domains[level], mask_data[level] );
         VectorQ1Scalar< ScalarType > inverse_diagonal(
             "inv_diag_level_" + std::to_string( level ), domains[level], mask_data[level] );
-        Laplace A_diag(
-            domains[level],
-            subdomain_shell_coords[level],
-            subdomain_radii[level],
-            boundary_mask_data[level],
-            true,
-            true );
+        Laplace A_diag( domains[level], subdomain_shell_coords[level], subdomain_radii[level], true, true );
         assign( tmp_smoother, 1.0 );
         apply( A_diag, tmp_smoother, inverse_diagonal );
 
@@ -200,26 +195,16 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
             tmp_r_c.emplace_back( "tmp_r_c_level_" + std::to_string( level ), domains[level], mask_data[level] );
             tmp_e_c.emplace_back( "tmp_e_c_level_" + std::to_string( level ), domains[level], mask_data[level] );
 
-            A_c.emplace_back(
-                domains[level],
-                subdomain_shell_coords[level],
-                subdomain_radii[level],
-                boundary_mask_data[level],
-                true,
-                false );
+            A_c.emplace_back( domains[level], subdomain_shell_coords[level], subdomain_radii[level], true, false );
 
             if constexpr ( std::is_same_v<
                                Prolongation,
                                fe::wedge::operators::shell::ProlongationLinear< ScalarType > > )
             {
                 P_additive.emplace_back(
-                    domains[level + 1],
-                    domains[level],
-                    subdomain_shell_coords[level + 1],
-                    subdomain_radii[level + 1],
-                    linalg::OperatorApplyMode::Add );
+                    subdomain_shell_coords[level + 1], subdomain_radii[level + 1], linalg::OperatorApplyMode::Add );
                 //R.emplace_back( domains[level] );
-                 R.emplace_back( domains[level], subdomain_shell_coords[level + 1], subdomain_radii[level + 1] );
+                R.emplace_back( domains[level], subdomain_shell_coords[level + 1], subdomain_radii[level + 1] );
             }
             else if constexpr ( std::is_same_v<
                                     Prolongation,
@@ -243,17 +228,9 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
     const auto num_dofs = kernels::common::count_masked< long >( mask_data.back(), grid::NodeOwnershipFlag::OWNED );
     std::cout << "num_dofs = " << num_dofs << std::endl;
 
-    Laplace A(
-        domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), boundary_mask_data.back(), true, false );
-    Laplace A_neumann(
-        domains.back(),
-        subdomain_shell_coords.back(),
-        subdomain_radii.back(),
-        boundary_mask_data.back(),
-        false,
-        false );
-    Laplace A_neumann_diag(
-        domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), boundary_mask_data.back(), false, true );
+    Laplace A( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), true, false );
+    Laplace A_neumann( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), false, false );
+    Laplace A_neumann_diag( domains.back(), subdomain_shell_coords.back(), subdomain_radii.back(), false, true );
 
     using Mass = fe::wedge::operators::shell::Mass< ScalarType >;
 
@@ -319,7 +296,7 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
 
     if ( true )
     {
-        io::XDMFOutput xdmf( ".", subdomain_shell_coords.back(), subdomain_radii.back() );
+        io::XDMFOutput xdmf( ".", domains.back(), subdomain_shell_coords.back(), subdomain_radii.back() );
         xdmf.add( u.grid_data() );
         xdmf.add( solution.grid_data() );
         xdmf.add( error.grid_data() );

@@ -132,7 +132,7 @@ void test( int level, int timesteps, double dt, const std::shared_ptr< util::Tab
     linalg::solvers::PBiCGStab< AD > bicgstab( 2, solver_params, table, tmps );
     bicgstab.set_tag( "bicgstab_solver_level_" + std::to_string( level ) );
 
-    io::XDMFOutput< ScalarType > xdmf_output( ".", subdomain_shell_coords, subdomain_radii );
+    io::XDMFOutput< ScalarType > xdmf_output( ".", domain, subdomain_shell_coords, subdomain_radii );
     xdmf_output.add( T.grid_data() );
     xdmf_output.add( solution.grid_data() );
     xdmf_output.add( error.grid_data() );

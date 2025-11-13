@@ -33,8 +33,9 @@ class DivKGradSimple
 
     grid::shell::DistributedDomain domain_;
 
-    grid::Grid3DDataVec< ScalarT, 3 > grid_;
-    grid::Grid2DDataScalar< ScalarT > radii_;
+    grid::Grid3DDataVec< ScalarT, 3 >    grid_;
+    grid::Grid2DDataScalar< ScalarT >    radii_;
+    grid::Grid4DDataScalar< ScalarType > k_;
 
     bool treat_boundary_;
     bool diagonal_;
@@ -52,8 +53,6 @@ class DivKGradSimple
     ScalarT                  quad_weights_3x2_[quadrature::quad_felippa_3x2_num_quad_points];
     dense::Vec< ScalarT, 3 > quad_points_1x1_[quadrature::quad_felippa_1x1_num_quad_points];
     ScalarT                  quad_weights_1x1_[quadrature::quad_felippa_1x1_num_quad_points];
-
-    grid::Grid4DDataScalar< ScalarType > k_;
 
   public:
     DivKGradSimple(
@@ -106,7 +105,7 @@ class DivKGradSimple
         const int x_cell,
         const int y_cell,
         const int r_cell,
-        const int wedge )
+        const int wedge ) const
     {
         assert( lmatrices_.data() != nullptr );
 

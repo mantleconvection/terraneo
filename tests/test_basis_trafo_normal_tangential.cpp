@@ -237,7 +237,7 @@ void test( int level )
 
     ///////////////////
 
-    io::XDMFOutput xdmf( "test_basis_trafo_normal_tangential_out", coords_shell, coords_radii );
+    io::XDMFOutput xdmf( "test_basis_trafo_normal_tangential_out", domain, coords_shell, coords_radii );
     xdmf.add( a.grid_data() );
     xdmf.add( b.grid_data() );
     xdmf.add( no_normal.grid_data() );

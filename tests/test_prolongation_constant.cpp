@@ -180,14 +180,14 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     if ( true )
     {
-        io::XDMFOutput xdmf_output_fine( ".", subdomain_shell_coords_fine, subdomain_radii_fine );
+        io::XDMFOutput xdmf_output_fine( ".", domain_fine, subdomain_shell_coords_fine, subdomain_radii_fine );
         xdmf_output_fine.add( u_fine.grid_data() );
         xdmf_output_fine.add( solution_fine.grid_data() );
         xdmf_output_fine.add( error_fine.grid_data() );
 
         xdmf_output_fine.write();
 
-        io::XDMFOutput xdmf_output_coarse( ".", subdomain_shell_coords_coarse, subdomain_radii_coarse );
+        io::XDMFOutput xdmf_output_coarse( ".", domain_coarse, subdomain_shell_coords_coarse, subdomain_radii_coarse );
         xdmf_output_coarse.add( u_coarse.grid_data() );
 
         xdmf_output_coarse.write();

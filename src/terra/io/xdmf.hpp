@@ -3,6 +3,7 @@
 
 #include <fstream>
 
+#include "terra/grid/shell/spherical_shell.hpp"
 #include "mpi/mpi.hpp"
 #include "util/filesystem.hpp"
 #include "util/logging.hpp"

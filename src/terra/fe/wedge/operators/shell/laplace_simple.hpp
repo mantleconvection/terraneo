@@ -29,7 +29,6 @@ class LaplaceSimple
     bool applyStoredLMatrices_ =
         false; // set to make apply_impl() load and use the stored LMatrices for the operator application
     Grid4DDataLocalMatrices lmatrices_;
-    bool                    single_quadpoint_ = true;
 
     grid::shell::DistributedDomain domain_;
 
@@ -38,6 +37,7 @@ class LaplaceSimple
 
     bool treat_boundary_;
     bool diagonal_;
+    bool single_quadpoint_;
 
     linalg::OperatorApplyMode         operator_apply_mode_;
     linalg::OperatorCommunicationMode operator_communication_mode_;
@@ -60,7 +60,7 @@ class LaplaceSimple
         const grid::Grid2DDataScalar< ScalarT >& radii,
         bool                                     treat_boundary,
         bool                                     diagonal,
-        bool single_quadpoint,
+        bool                                     single_quadpoint    = false,
         linalg::OperatorApplyMode                operator_apply_mode = linalg::OperatorApplyMode::Replace,
         linalg::OperatorCommunicationMode        operator_communication_mode =
             linalg::OperatorCommunicationMode::CommunicateAdditively )
@@ -69,7 +69,7 @@ class LaplaceSimple
     , radii_( radii )
     , treat_boundary_( treat_boundary )
     , diagonal_( diagonal )
-    , single_quadpoint_(single_quadpoint)
+    , single_quadpoint_( single_quadpoint )
     , operator_apply_mode_( operator_apply_mode )
     , operator_communication_mode_( operator_communication_mode )
     // TODO: we can reuse the send and recv buffers and pass in from the outside somehow
@@ -104,7 +104,7 @@ class LaplaceSimple
         const int x_cell,
         const int y_cell,
         const int r_cell,
-        const int wedge )
+        const int wedge ) const
     {
         assert( lmatrices_.data() != nullptr );
 

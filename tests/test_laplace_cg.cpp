@@ -190,7 +190,7 @@ double test( int level, const std::shared_ptr< util::Table >& table )
 
     if ( false )
     {
-        io::XDMFOutput< double > xdmf( ".", coords_shell, coords_radii );
+        io::XDMFOutput< double > xdmf( ".", domain, coords_shell, coords_radii );
         xdmf.add( g.grid_data() );
         xdmf.add( u.grid_data() );
         xdmf.add( solution.grid_data() );

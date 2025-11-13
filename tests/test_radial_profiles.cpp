@@ -70,8 +70,9 @@ void test( int level )
 
     const auto domain = DistributedDomain::create_uniform_single_subdomain_per_diamond( level, level, 0.5, 1.0 );
 
-    const auto coords_shell = grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
-    const auto coords_radii = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
+    const auto coords_shell  = grid::shell::subdomain_unit_sphere_single_shell_coords< ScalarType >( domain );
+    const auto coords_radii  = terra::grid::shell::subdomain_shell_radii< ScalarType >( domain );
+    const auto shell_indices = terra::grid::shell::subdomain_shell_idx( domain );
 
     auto mask_data = grid::setup_node_ownership_mask_data( domain );
 
@@ -85,9 +86,10 @@ void test( int level )
 
     Kokkos::fence();
 
-    auto profiles_device = shell::radial_profiles( u );
+    auto profiles_device = shell::radial_profiles( u, shell_indices, domain.domain_info().radii().size() );
 
-    auto profiles = shell::radial_profiles_to_table( shell::radial_profiles( u ), domain.domain_info().radii() );
+    auto profiles = shell::radial_profiles_to_table(
+        shell::radial_profiles( u, shell_indices, domain.domain_info().radii().size() ), domain.domain_info().radii() );
 
     profiles.print_pretty();
 

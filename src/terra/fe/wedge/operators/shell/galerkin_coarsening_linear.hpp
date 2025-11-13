@@ -377,8 +377,10 @@ class TwoGridGCA
         }
         else
         {
-            coarse_op_.set_lmatrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 0, A_coarse[0] );
-            coarse_op_.set_lmatrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 1, A_coarse[1] );
+            // Does not build
+            Kokkos::abort( "Not implemented" );
+            // coarse_op_.set_lmatrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 0, A_coarse[0] );
+            // coarse_op_.set_lmatrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 1, A_coarse[1] );
         }
     }
 };
