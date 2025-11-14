@@ -45,7 +45,7 @@ int main( int argc, char** argv )
 
     logroot << description << "\n\n";
 
-    const auto checkpoint_metadata_result = terra::io::read_checkpoint_metadata( checkpoint_directory );
+    const auto checkpoint_metadata_result = terra::io::read_xdmf_checkpoint_metadata( checkpoint_directory );
     if ( checkpoint_metadata_result.is_err() )
     {
         logroot << checkpoint_metadata_result.error() << std::endl;
@@ -154,7 +154,7 @@ int main( int argc, char** argv )
                     {
                         terra::linalg::VectorQ1Scalar< float > vec(
                             grid_data_file.grid_name_string, domain, mask_data );
-                        const auto result = terra::io::read_checkpoint(
+                        const auto result = terra::io::read_xdmf_checkpoint_grid(
                             checkpoint_directory, grid_data_file.grid_name_string, 0, domain, vec.grid_data() );
                         if ( result.is_err() )
                         {
@@ -168,7 +168,7 @@ int main( int argc, char** argv )
                     {
                         terra::linalg::VectorQ1Scalar< double > vec(
                             grid_data_file.grid_name_string, domain, mask_data );
-                        const auto result = terra::io::read_checkpoint(
+                        const auto result = terra::io::read_xdmf_checkpoint_grid(
                             checkpoint_directory, grid_data_file.grid_name_string, 0, domain, vec.grid_data() );
                         if ( result.is_err() )
                         {

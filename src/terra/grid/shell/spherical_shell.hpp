@@ -474,6 +474,8 @@ void unit_sphere_single_shell_subdomain_coords(
 class SubdomainInfo
 {
   public:
+
+    /// @brief Creates invalid ID.
     SubdomainInfo()
     : diamond_id_( -1 )
     , subdomain_x_( -1 )
@@ -481,6 +483,7 @@ class SubdomainInfo
     , subdomain_r_( -1 )
     {}
 
+    /// @brief Creates unique subdomain ID.
     SubdomainInfo( int diamond_id, int subdomain_x, int subdomain_y, int subdomain_r )
     : diamond_id_( diamond_id )
     , subdomain_x_( subdomain_x )
@@ -488,6 +491,9 @@ class SubdomainInfo
     , subdomain_r_( subdomain_r )
     {}
 
+    /// @brief Read from encoded 64-bit integer.
+    ///
+    /// See \ref global_id() for format.
     explicit SubdomainInfo( const int64_t global_id )
     : diamond_id_( static_cast< int >( ( global_id >> 57 ) ) )
     , subdomain_x_( static_cast< int >( ( global_id >> 0 ) & ( ( 1 << 19 ) - 1 ) ) )
@@ -525,6 +531,16 @@ class SubdomainInfo
     }
 
     /// @brief Scrambles the four indices (diamond ID, x, y, r) into a single integer.
+    ///
+    /// Format
+    /// @code
+    ///
+    /// bits (LSB)  0-18        (19 bits): subdomain_x
+    /// bits       19-37        (19 bits): subdomain_y
+    /// bits       38-56        (19 bits): subdomain_r
+    /// bits       57-63 (MSB)  ( 7 bits): diamond_id (in [0, ..., 9])
+    ///
+    /// @endcode
     [[nodiscard]] int64_t global_id() const
     {
         if ( diamond_id_ >= 10 )

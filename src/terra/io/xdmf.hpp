@@ -3,8 +3,8 @@
 
 #include <fstream>
 
-#include "terra/grid/shell/spherical_shell.hpp"
 #include "mpi/mpi.hpp"
+#include "terra/grid/shell/spherical_shell.hpp"
 #include "util/filesystem.hpp"
 #include "util/logging.hpp"
 #include "util/result.hpp"
@@ -12,23 +12,132 @@
 
 namespace terra::io {
 
-/// @brief XDMF output for visualization with software like Paraview.
+/// @brief XDMF output that simultaneously serves for visualization with software like Paraview and as a simulation
+/// checkpoint.
 ///
-/// Interprets data as block-structured wedge-element meshes (like the thick spherical shell is).
+/// # Overview
+///
+/// Writes simulation data (time-series for a constant mesh) and metadata into a directory.
+/// The written data simultaneously serves for visualization with tools that can read XDMF files (e.g., Paraview) and
+/// can be used to restore the grid data, e.g., to continue a previous simulation (aka checkpoint).
+/// This does not involve data duplication. The data required for XDMF is directly used as a checkpoint.
+///
+/// Currently restricted to the spherical shell mesh data structure.
+/// Interprets data as block-structured wedge-element meshes.
+///
+/// # File overview (what is written)
 ///
 /// The mesh data has to be added upon construction.
-/// None, one, or many scalar or vector-valued grids can be added.
+/// None, one, or many scalar or vector-valued grids can be added afterward.
 ///
-/// Each write() call then writes out a corresponding .xmf file to the specified directory with an increasing index.
-/// So for time-dependent runs, call write() in, say, every timestep.
+/// Each write() call then writes out
+/// - binary data files for each added grid data item containing the raw values,
+/// - an .xmf file to be used for visualization of all the binary files (read by an XDMF reader).
 ///
-/// The mesh is only written out ONCE during the first write() call and then re-used (referenced) by all files produced
-/// by later write calls.
+/// The first write() call also writes (once)
+/// - the mesh data (grid coordinates/topology) to binary files
+/// - a checkpoint metadata file required to read in the checkpoints
 ///
-/// All added data grids must have different (Kokkos::View-)labels. Otherwise, the output will be corrupted.
+/// For time-dependent runs, call write() in, e.g., every timestep. The mesh written in the first call will be
+/// referenced from each .xmf file.
+///
+/// # Output file precision
 ///
 /// The actually written data type can be selected regardless of the underlying data type of the allocated data for the
 /// mesh points, topology, and each data grid. Defaults are selected via default parameters.
+/// Concretely, you can write your double precision fields in single precision without converting them manually.
+/// Note that this means that your checkpoints obviously have the same precision that you specify here.
+///
+/// # Other notes
+///
+/// All added data grids must have different (Kokkos::View-)labels.
+///
+/// Uses MPI IO for fast parallel output.
+///
+/// # Checkpoints
+///
+/// To recover a checkpoint, use the function \ref read_xdmf_checkpoint_grid() (or
+/// \ref read_xdmf_checkpoint_metadata() to just inspect the structure of the checkpoint).
+///
+/// Note that the checkpoint can only be read using the same domain partitioning (i.e., the 'topology' of the
+/// \ref DistributedDomain used when the checkpoint was written must be identical) - BUT the number of MPI processes
+/// does not need to match (nor does the distribution of subdomains to ranks need to match). So you can technically
+/// (if the amount of main memory permits) read a checkpoint from a large parallel simulation with only one or a few
+/// processes (possibly useful for post-processing).
+///
+/// # Checkpoint data binary format
+///
+/// All data is written to a single binary file per grid data item and per time step.
+/// Each subdomain is written contiguously. Concretely, per subdomain (also applies to the grid point coordinates)
+///
+/// @code
+///  for ( each subdomain )
+///  {
+///     for ( int r = 0; r < subdomain_size_r; r++ )
+///     {
+///         for ( int y = 0; y < subdomain_size_y; y++ )
+///         {
+///             for ( int x = 0; x < subdomain_size_x; x++ )
+///             {
+///                 for ( int d = 0; d < point_dim; d++ )
+///                 {
+///                     stream << data( subdomain_id, x, y, r, d )
+///                 }
+///             }
+///         }
+///     }
+/// }
+/// @endcode
+///
+/// The subdomain order depends on the various factors and can be basically random.
+/// The concrete ordering (as well as the data type) is reflected in the checkpoint metadata (see below).
+///
+/// # Checkpoint metadata format (required only once per time series)
+///
+/// See \ref terra::grid::shell::SubdomainInfo for how the global subdomain ID is encoded.
+///
+/// @code
+/// version:                                      i32
+/// num_subdomains_per_diamond_lateral_direction: i32
+/// num_subdomains_per_diamond_radial_direction:  i32
+/// subdomain_size_x:                             i32
+/// subdomain_size_y:                             i32
+/// subdomain_size_r:                             i32
+/// radii:                                        array: f64, entries: num_subdomains_per_diamond_radial_direction * (subdomain_size_r - 1) + 1
+/// num_grid_data_files:                          i32
+/// list (size = num_grid_data_files)
+/// [
+///     grid_name_string_size_bytes:              i32
+///     grid_name_string:                         grid_name_string_size_bytes * 8
+///     scalar_data_type:                         i32 // 0: signed integer, 1: unsigned integer, 2: float
+///     scalar_bytes:                             i32
+///     vec_dim:                                  i32
+/// ]
+/// checkpoint_subdomain_ordering:                i32
+/// if (checkpoint_subdomain_ordering == 0) {
+///     // The following list contains the encoded global_subdomain_ids (as i64) in the order in which the
+///     // subdomains are written to the data files. To find out where a certain subdomain is located in the
+///     // file, the starting offset must be set equal to the index of the global_subdomain_id in the list below,
+///     // multiplied by the size of a single chunk of data per subdomain.
+///     // That means that in the worst case, the entire list must be read to find the correct subdomain.
+///     // However, this way it is easy to _write_ the metadata since we do not need to globally sort the subdomain
+///     // positions in the parallel setting, and we get away with O(1) local memory usage during parsing.
+///     // Lookup is O(n), though.
+///     //
+///     // An alternative would be to sort the list before writing the checkpoint and store the _position of the
+///     // subdomain data_ instead of the global_subdomain_id. Since the global_subdomain_id is sortable, an
+///     // implicit mapping from global_subdomain_id to this list's index can be accomplished.
+///     // Then look up the position of the data in O(1).
+///     // However, that would require reducing the entire list on one process which is in theory not scalable
+///     // (plus the sorting approach is a tiny bit more complicated).
+///     // Use a different value for checkpoint_subdomain_ordering in that case and extend the file format.
+///     list (size = "num_global_subdomains" = 10 * num_subdomains_per_diamond_lateral_direction * num_subdomains_per_diamond_lateral_direction * num_subdomains_per_diamond_radial_direction)
+///     [
+///         global_subdomain_id: i64
+///     ]
+/// }
+/// @endcode
+///
 template < typename InputGridScalarType >
 class XDMFOutput
 {
@@ -55,7 +164,16 @@ class XDMFOutput
     ///
     /// All data will be written to the specified directory (it is a good idea to pass an empty directory).
     ///
-    /// Does not write any data, yet.
+    /// Construction does not write any data, yet.
+    ///
+    /// @param directory_path Path to a directory that the data shall be written to. If the directory does not exist,
+    ///                       it will be created during the first write() call. If it does already exist, data will be
+    ///                       overwritten.
+    /// @param distributed_domain \ref DistributedDomain instance.
+    /// @param coords_shell_device Lateral spherical shell grid coordinates (see \ref subdomain_unit_sphere_single_shell_coords()).
+    /// @param coords_radii_device Spherical shell radii (see \ref subdomain_shell_radii()).
+    /// @param output_type_points Floating point data type to use for mesh coordinate output.
+    /// @param output_type_connectivity Integer data type to use for mesh connectivity output.
     XDMFOutput(
         const std::string&                                   directory_path,
         const grid::shell::DistributedDomain&                distributed_domain,
@@ -154,18 +272,20 @@ class XDMFOutput
     /// time series.
     ///
     /// The first write() call after construction will also write the mesh data (binary files) that will be referenced
-    /// from later .xmf files.
+    /// from later .xmf files, as well as checkpoint metadata.
     ///
-    /// For each added data grid, one additional binary file is written. The data is copied to the host if required.
+    /// For each added data grid, one binary file is written. The data is copied to the host if required.
     /// The write() calls will allocate temporary storage on the host if host and device memory are not shared.
-    /// Currently, for data grids, some host-side temporary buffers are kept (the sizes depend on the type of data
-    /// added) to avoid frequent reallocation.
+    /// Currently, for data grids, some host-side temporary buffers are kept after this method returns (the sizes depend
+    /// on the type of data added) to avoid frequent reallocation.
     void write()
     {
         using util::XML;
 
         const auto geometry_file_base = "geometry.bin";
         const auto topology_file_base = "topology.bin";
+
+        const auto readme_file_path = directory_path_ + "/README.md";
 
         const auto geometry_file_path = directory_path_ + "/" + geometry_file_base;
         const auto topology_file_path = directory_path_ + "/" + topology_file_base;
@@ -215,7 +335,21 @@ class XDMFOutput
 
             // Add a README to the directory (what to keep, what the data contains, some notes on how to use paraview).
 
-            // TODO
+            if ( mpi::rank() == 0 )
+            {
+                std::ofstream readme_stream( readme_file_path );
+                readme_stream
+                    << "# This directory contains the output of the XDMF writer (for visualization and checkpointing).\n";
+                readme_stream << "\n";
+                readme_stream << "Overview:\n";
+                readme_stream << "- `geometry.bin`: cartesian node coordinates\n";
+                readme_stream << "- `topology.bin`: connectivity/topology/elements (whatever you want to call it)\n";
+                readme_stream << "- `checkpoint_metadata.bin`: metadata for checkpointing\n";
+                readme_stream
+                    << "- `step_*.xmf`: xmf file (open this with Paraview for visualization) for each write() step\n";
+                readme_stream << "- `<some_name>_*.bin`: binary grid data (per write() step)\n";
+                readme_stream.close();
+            }
 
             // Write mesh binary data if first write
 
@@ -747,52 +881,6 @@ class XDMFOutput
         return attribute;
     }
 
-    /// Format (required once per series):
-    ///
-    /// @code
-    /// version:                                      i32
-    /// num_subdomains_per_diamond_lateral_direction: i32
-    /// num_subdomains_per_diamond_radial_direction:  i32
-    /// subdomain_size_x:                             i32
-    /// subdomain_size_y:                             i32
-    /// subdomain_size_r:                             i32
-    /// radii:                                        array: f64, entries: num_subdomains_per_diamond_radial_direction * (subdomain_size_r - 1) + 1
-    /// num_grid_data_files:                          i32
-    /// list (size = num_grid_data_files)
-    /// [
-    ///     grid_name_string_size_bytes:              i32
-    ///     grid_name_string:                         grid_name_string_size_bytes * 8
-    ///     scalar_data_type:                         i32 // 0: signed integer, 1: unsigned integer, 2: float
-    ///     scalar_bytes:                             i32
-    ///     vec_dim:                                  i32
-    /// ]
-    /// checkpoint_subdomain_ordering:                i32
-    /// if (checkpoint_subdomain_ordering == 0) {
-    ///     // The following list contains the encoded global_subdomain_ids (as i64) in the order in which the
-    ///     // subdomains are written to the data files. To find out where a certain subdomain is located in the
-    ///     // file, the starting offset must be set equal to the index of the global_subdomain_id in the list below,
-    ///     // multiplied by the size of a single chunk of data per subdomain.
-    ///     // That means that in the worst case, the entire list must be read to find the correct subdomain.
-    ///     // However, this way it is easy to _write_ the metadata since we do not need to globally sort the subdomain
-    ///     // positions in the parallel setting, and we get away with O(1) local memory usage during parsing.
-    ///     // Lookup is O(n), though.
-    ///     //
-    ///     // An alternative would be to sort the list before writing the checkpoint and store the _position of the
-    ///     // subdomain data_ instead of the global_subdomain_id. Since the global_subdomain_id is sortable, an
-    ///     // implicit mapping from global_subdomain_id to this list's index can be accomplished.
-    ///     // Then look up the position of the data in O(1).
-    ///     // However, that would require reducing the entire list on one process which is in theory not scalable
-    ///     // (plus the sorting approach is a tiny bit more complicated).
-    ///     // Use a different value for checkpoint_subdomain_ordering in that case and extend the file format.
-    ///     list (size = "num_global_subdomains" = 10 * num_subdomains_per_diamond_lateral_direction * num_subdomains_per_diamond_lateral_direction * num_subdomains_per_diamond_radial_direction)
-    ///     [
-    ///         global_subdomain_id: i64
-    ///     ]
-    /// }
-    /// @endcode
-    ///
-    /// @note Must be called collectively by all processes.
-    ///
     void write_checkpoint_metadata()
     {
         const auto checkpoint_metadata_file_path = directory_path_ + "/" + "checkpoint_metadata.bin";
@@ -999,6 +1087,7 @@ class XDMFOutput
 };
 
 /// Captures the format of the checkpoint metadata.
+/// See \ref XDMFOutput for details on the format.
 struct CheckpointMetadata
 {
     int32_t version{};
@@ -1025,8 +1114,12 @@ struct CheckpointMetadata
     std::vector< int64_t > checkpoint_ordering_0_global_subdomain_ids;
 };
 
+/// @brief Reads metadata from an XDMF/checkpoint directory. See \ref XDMFOutput for details.
+///
+/// @param checkpoint_directory path to the directory containing the XDMF data
+/// @return Populated \ref CheckpointMetadata struct.
 [[nodiscard]] inline util::Result< CheckpointMetadata >
-    read_checkpoint_metadata( const std::string& checkpoint_directory )
+    read_xdmf_checkpoint_metadata( const std::string& checkpoint_directory )
 {
     const auto metadata_file = checkpoint_directory + "/" + "checkpoint_metadata.bin";
 
@@ -1150,15 +1243,25 @@ struct CheckpointMetadata
     return metadata;
 }
 
+/// @brief Reads a single grid at a single write step from an XDMF checkpoint.
+///
+/// See \ref XDMFOutput for details.
+///
+/// @param checkpoint_directory path to the directory containing the XDMF data
+/// @param data_label the Kokkos::View label of the grid data that shall be read in
+/// @param step the "timestep" to read
+/// @param distributed_domain \ref DistributedDomain instance that has the same topology as the one used when writing
+///                           the checkpoint
+/// @param grid_data_device [out] properly sized Kokkos::View (can live on a device) to write the checkpoint to
 template < typename GridDataType >
-[[nodiscard]] util::Result<> read_checkpoint(
+[[nodiscard]] util::Result<> read_xdmf_checkpoint_grid(
     const std::string&                    checkpoint_directory,
     const std::string&                    data_label,
     const int                             step,
     const grid::shell::DistributedDomain& distributed_domain,
     GridDataType&                         grid_data_device )
 {
-    auto checkpoint_metadata_result = read_checkpoint_metadata( checkpoint_directory );
+    auto checkpoint_metadata_result = read_xdmf_checkpoint_metadata( checkpoint_directory );
 
     if ( checkpoint_metadata_result.is_err() )
     {
@@ -1370,4 +1473,4 @@ template < typename GridDataType >
     return { util::Ok{} };
 }
 
-} // namespace terra::visualization
+} // namespace terra::io
