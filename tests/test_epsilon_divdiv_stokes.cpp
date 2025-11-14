@@ -30,7 +30,7 @@
 #include "terra/io/vtk.hpp"
 #include "terra/kernels/common/grid_operations.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
-#include "terra/linalg/inv_diag_operator.hpp"
+#include "terra/linalg/diagonally_scaled_operator.hpp"
 #include "terra/linalg/solvers/diagonal_solver.hpp"
 #include "terra/linalg/solvers/power_iteration.hpp"
 #include "util/init.hpp"
@@ -49,10 +49,10 @@ using grid::shell::SubdomainInfo;
 using linalg::VectorQ1IsoQ2Q1;
 using linalg::VectorQ1Scalar;
 using linalg::VectorQ1Vec;
-using terra::fe::wedge::operators::shell::TwoGridGCA;
-using terra::linalg::InvDiagOperator;
-using terra::linalg::solvers::DiagonalSolver;
-using terra::linalg::solvers::power_iteration;
+using fe::wedge::operators::shell::TwoGridGCA;
+using linalg::DiagonallyScaledOperator;
+using linalg::solvers::DiagonalSolver;
+using linalg::solvers::power_iteration;
 
 struct SolutionVelocityInterpolator
 {
@@ -471,13 +471,13 @@ std::tuple< double, double, int > test( int min_level, int max_level, const std:
         double                    max_ev = 0.0;
         if ( level == num_levels - 1 )
         {
-            InvDiagOperator< Viscous > inv_diag_A( K.block_11(), inverse_diagonals[level] );
-            max_ev = power_iteration< InvDiagOperator< Viscous > >( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
+            DiagonallyScaledOperator< Viscous > inv_diag_A( K.block_11(), inverse_diagonals[level] );
+            max_ev = power_iteration< DiagonallyScaledOperator< Viscous > >( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
         }
         else
         {
-            InvDiagOperator< Viscous > inv_diag_A( A_c[level], inverse_diagonals[level] );
-            max_ev = power_iteration< InvDiagOperator< Viscous > >( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
+            DiagonallyScaledOperator< Viscous > inv_diag_A( A_c[level], inverse_diagonals[level] );
+            max_ev = power_iteration< DiagonallyScaledOperator< Viscous > >( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
         }
         const auto omega_opt = 2.0 / ( 1.1 * max_ev );
         smoothers.emplace_back( inverse_diagonals[level], smoother_prepost, tmp_mg[level], omega_opt );

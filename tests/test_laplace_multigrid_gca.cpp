@@ -25,7 +25,7 @@
 #include "terra/io/xdmf.hpp"
 #include "terra/kernels/common/grid_operations.hpp"
 #include "terra/kokkos/kokkos_wrapper.hpp"
-#include "terra/linalg/inv_diag_operator.hpp"
+#include "terra/linalg/diagonally_scaled_operator.hpp"
 #include "terra/linalg/solvers/power_iteration.hpp"
 #include "util/init.hpp"
 #include "util/table.hpp"
@@ -41,7 +41,7 @@ using grid::shell::DomainInfo;
 using grid::shell::SubdomainInfo;
 using linalg::VectorQ1Scalar;
 using terra::fe::wedge::operators::shell::TwoGridGCA;
-using terra::linalg::InvDiagOperator;
+using terra::linalg::DiagonallyScaledOperator;
 using terra::linalg::solvers::power_iteration;
 
 template < std::floating_point T >
@@ -280,13 +280,13 @@ T test( int min_level, int max_level, const std::shared_ptr< util::Table >& tabl
         T max_ev = 0.0;
         if ( level < max_level )
         {
-            InvDiagOperator< Laplace > inv_diag_A( A_c[level - min_level], inverse_diagonal );
-            max_ev = power_iteration< InvDiagOperator< Laplace > >( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
+            DiagonallyScaledOperator< Laplace > inv_diag_A( A_c[level - min_level], inverse_diagonal );
+            max_ev = power_iteration< DiagonallyScaledOperator< Laplace > >( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
         }
         else
         {
-            InvDiagOperator< Laplace > inv_diag_A( A, inverse_diagonal );
-            max_ev = power_iteration< InvDiagOperator< Laplace > >( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
+            DiagonallyScaledOperator< Laplace > inv_diag_A( A, inverse_diagonal );
+            max_ev = power_iteration< DiagonallyScaledOperator< Laplace > >( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
         }
 
         // compute optimal jacobi weight: omega_opt = 2/(lambda_min + lambda_max)

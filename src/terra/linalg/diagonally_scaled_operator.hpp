@@ -7,8 +7,12 @@
 
 namespace terra::linalg {
 
-template < terra::linalg::OperatorLike OperatorT >
-class InvDiagOperator
+/// @brief Given some operator \f$K\f$ and a vector \f$v\f$, this operator is equivalent to an operator \f$A\f$ defined as
+///
+/// \f[ A = \mathrm{diag}(v) K \f]
+///
+template < OperatorLike OperatorT >
+class DiagonallyScaledOperator
 {
   public:
     using OperatorType  = OperatorT;
@@ -18,20 +22,21 @@ class InvDiagOperator
 
   private:
     OperatorT&     op_;
-    SrcVectorType& inv_diag_;
+    SrcVectorType& diag_;
 
   public:
-    explicit InvDiagOperator( OperatorT& op, SrcVectorType& inv_diag )
+    explicit DiagonallyScaledOperator( OperatorT& op, SrcVectorType& diag )
     : op_( op )
-    , inv_diag_( inv_diag ) {};
+    , diag_( diag ) {};
 
     void apply_impl( const SrcVectorType& src, DstVectorType& dst )
     {
         apply( op_, src, dst );
-        scale_in_place( dst, inv_diag_ );
+        scale_in_place( dst, diag_ );
     }
 };
 
-static_assert( linalg::OperatorLike< InvDiagOperator< terra::fe::wedge::operators::shell::LaplaceSimple< double > > > );
+static_assert(
+    linalg::OperatorLike< DiagonallyScaledOperator< fe::wedge::operators::shell::LaplaceSimple< double > > > );
 
 } // namespace terra::linalg

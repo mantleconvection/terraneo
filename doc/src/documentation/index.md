@@ -125,7 +125,7 @@ terraneox/
 - [ ] iterative refinement
 - [x] spherical harmonics helper
 - [ ] radial profiles loader
-- [ ] checkpoints (re-use XDMF bin files!)
+- [x] checkpoints (re-use XDMF bin files!)
 - [ ] return unmanaged views from SubdomainNeighborhoodSendRecvBuffer that point to contiguous memory per rank, add
   another getter to the pointer of that array and then pass that to MPI_Send/Recv instead
 - [x] radial layer data assimilation
@@ -133,6 +133,9 @@ terraneox/
 - [x] ~~compress VTK(?)~~ XDMF output (binary, actual float data, and ~~/or~~ ~~HDF5/ADIOS2~~ with a single mesh file)
 - [x] CLI interface / parameter files
 - [ ] viscosity-weighted pressure-mass / lumped mass (Fabi)
+- [ ] unify/cleanup boundary handling in operators
+- [ ] unify/cleanup operator interfaces and documentation
+- [ ] concept for GCA-capable operators
 
 ## Small features / improvements (not necessarily / maybe required)
 

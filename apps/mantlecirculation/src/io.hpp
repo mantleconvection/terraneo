@@ -2,7 +2,6 @@
 #pragma once
 
 #include <fstream>
-#include <util/arg_parser.hpp>
 #include <vector>
 
 #include "grid/grid_types.hpp"
