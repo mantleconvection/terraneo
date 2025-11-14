@@ -38,9 +38,8 @@ struct StokesSolverParameters
     double krylov_relative_tolerance = 1e-6;
     double krylov_absolute_tolerance = 1e-12;
 
-    int    viscous_pc_num_vcycles                 = 2;
-    int    viscous_pc_num_smoothing_steps_prepost = 2;
-    double viscous_pc_omega                       = 0.1;
+    int viscous_pc_num_vcycles                 = 2;
+    int viscous_pc_num_smoothing_steps_prepost = 2;
 };
 
 struct EnergySolverParameters
@@ -127,10 +126,6 @@ inline util::Result< Parameters > parse_parameters( int argc, char** argv )
         app,
         "--stokes-viscous-pc-num-smoothing-steps-prepost",
         parameters.stokes_solver_parameters.viscous_pc_num_smoothing_steps_prepost );
-    add_option_with_default(
-        app,
-        "--stokes-viscous-pc-omega",
-        parameters.stokes_solver_parameters.viscous_pc_omega );
 
     add_option_with_default( app, "--outdir", parameters.io_parameters.outdir );
     add_flag_with_default( app, "--outdir-overwrite", parameters.io_parameters.overwrite );

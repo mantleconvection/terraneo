@@ -1,14 +1,12 @@
-
-
 #include <fstream>
-#include <util/arg_parser.hpp>
 #include <vector>
 
 #include "communication/shell/communication.hpp"
 #include "fe/strong_algebraic_dirichlet_enforcement.hpp"
 #include "fe/wedge/integrands.hpp"
 #include "fe/wedge/operators/shell/epsilon_divdiv_stokes.hpp"
-#include "fe/wedge/operators/shell/identity.hpp"
+#include "fe/wedge/operators/shell/galerkin_coarsening_linear.hpp"
+#include "fe/wedge/operators/shell/kmass.hpp"
 #include "fe/wedge/operators/shell/mass.hpp"
 #include "fe/wedge/operators/shell/prolongation_constant.hpp"
 #include "fe/wedge/operators/shell/restriction_constant.hpp"
@@ -20,11 +18,14 @@
 #include "io/xdmf.hpp"
 #include "kernels/common/grid_operations.hpp"
 #include "kokkos/kokkos_wrapper.hpp"
+#include "linalg/diagonally_scaled_operator.hpp"
 #include "linalg/solvers/block_preconditioner_2x2.hpp"
+#include "linalg/solvers/diagonal_solver.hpp"
 #include "linalg/solvers/fgmres.hpp"
 #include "linalg/solvers/jacobi.hpp"
 #include "linalg/solvers/multigrid.hpp"
 #include "linalg/solvers/pcg.hpp"
+#include "linalg/solvers/power_iteration.hpp"
 #include "linalg/vector_q1isoq2_q1.hpp"
 #include "src/io.hpp"
 #include "src/parameters.hpp"
@@ -53,6 +54,30 @@ using linalg::VectorQ1Vec;
 using util::logroot;
 using util::Ok;
 using util::Result;
+
+struct ViscosityInterpolator
+{
+    Grid3DDataVec< ScalarType, 3 > grid_;
+    Grid2DDataScalar< ScalarType > radii_;
+    Grid4DDataScalar< ScalarType > data_;
+
+    ViscosityInterpolator(
+        const Grid3DDataVec< ScalarType, 3 >& grid,
+        const Grid2DDataScalar< ScalarType >& radii,
+        const Grid4DDataScalar< ScalarType >& data )
+    : grid_( grid )
+    , radii_( radii )
+    , data_( data )
+    {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()( const int local_subdomain_id, const int x, const int y, const int r ) const
+    {
+        const dense::Vec< ScalarType, 3 > coords = grid::shell::coords( local_subdomain_id, x, y, r, grid_, radii_ );
+        data_( local_subdomain_id, x, y, r )     = Kokkos::pow(
+            ( 2.0 - Kokkos::cos( 2.0 * Kokkos::numbers::pi * ( 2.0 * ( coords.norm() - 0.5 ) - 0.3 ) ) ), 5.0 );
+    }
+};
 
 struct InitialConditionInterpolator
 {
@@ -227,6 +252,23 @@ Result<> run( const Parameters& prm )
     auto& u = stok_vecs["u"];
     auto& f = stok_vecs["f"];
 
+    // Set up viscosity.
+
+    std::vector< VectorQ1Scalar< ScalarType > > eta;
+    eta.reserve( num_levels );
+    for ( int level = 0; level < num_levels; level++ )
+    {
+        eta.emplace_back( "eta_level_" + std::to_string( level ), domains[level], ownership_mask_data[level] );
+    }
+
+    for ( int level = 0; level < num_levels; level++ )
+    {
+        Kokkos::parallel_for(
+            "interpolate_viscosity",
+            local_domain_md_range_policy_nodes( domains[level] ),
+            ViscosityInterpolator( coords_shell[level], coords_radii[level], eta[level].grid_data() ) );
+    }
+
     // Set up tmp vecs for FGMRES
 
     std::vector< VectorQ1IsoQ2Q1< ScalarType > > stokes_tmp_fgmres;
@@ -260,7 +302,7 @@ Result<> run( const Parameters& prm )
         }
     }
 
-    // Set up temperature vectors.
+    // Set up temperature and viscosity vectors.
 
     std::map< std::string, VectorQ1Scalar< ScalarType > > temp_vecs;
     std::vector< std::string >                            temp_vec_names = { "T", "q" };
@@ -290,9 +332,11 @@ Result<> run( const Parameters& prm )
 
     // Set up operators.
 
-    using Stokes      = fe::wedge::operators::shell::Stokes< ScalarType >;
+    using Stokes      = fe::wedge::operators::shell::EpsDivDivStokes< ScalarType >;
     using Viscous     = Stokes::Block11Type;
     using ViscousMass = fe::wedge::operators::shell::VectorMass< ScalarType >;
+
+    using Gradient = Stokes::Block12Type;
 
     using Prolongation = fe::wedge::operators::shell::ProlongationVecConstant< ScalarType >;
     using Restriction  = fe::wedge::operators::shell::RestrictionVecConstant< ScalarType >;
@@ -302,8 +346,19 @@ Result<> run( const Parameters& prm )
         domains[pressure_level],
         coords_shell[velocity_level],
         coords_radii[velocity_level],
+        eta[velocity_level].grid_data(),
         true,
         false );
+
+    Stokes K_neumann(
+        domains[velocity_level],
+        domains[pressure_level],
+        coords_shell[velocity_level],
+        coords_radii[velocity_level],
+        eta[velocity_level].grid_data(),
+        false,
+        false );
+    K_neumann.block_11().store_lmatrices();
 
     ViscousMass M( domains[velocity_level], coords_shell[velocity_level], coords_radii[velocity_level], false );
 
@@ -318,7 +373,8 @@ Result<> run( const Parameters& prm )
 
     for ( int level = 0; level < num_levels; level++ )
     {
-        A_diag.emplace_back( domains[level], coords_shell[level], coords_radii[level], true, true );
+        A_diag.emplace_back(
+            domains[level], coords_shell[level], coords_radii[level], eta[level].grid_data(), true, true );
 
         inverse_diagonals.emplace_back(
             "inverse_diagonal_" + std::to_string( level ), domains[level], ownership_mask_data[level] );
@@ -332,7 +388,9 @@ Result<> run( const Parameters& prm )
 
         if ( level < num_levels - 1 )
         {
-            A_c.emplace_back( domains[level], coords_shell[level], coords_radii[level], true, false );
+            A_c.emplace_back(
+                domains[level], coords_shell[level], coords_radii[level], eta[level].grid_data(), true, false );
+            A_c.back().store_lmatrices();
             P.emplace_back( linalg::OperatorApplyMode::Add );
             R.emplace_back( domains[level] );
         }
@@ -342,17 +400,57 @@ Result<> run( const Parameters& prm )
 
     // Multigrid preconditioner.
 
+    // GCA
+    if ( true )
+    {
+        for ( int level = num_levels - 2; level >= 0; level-- )
+        {
+            std::cout << "Assembling GCA on level " << level << std::endl;
+            for ( int dimi = 0; dimi < 3; dimi++ )
+            {
+                for ( int dimj = 0; dimj < 3; dimj++ )
+                {
+                    // std::cout << "Component (" << dimi << ", " << dimj << ")" << std::endl;
+                    fe::wedge::operators::shell::TwoGridGCA< ScalarType, Viscous >(
+                        ( level == num_levels - 2 ) ? K_neumann.block_11() : A_c[level + 1], A_c[level], dimi, dimj );
+                }
+            }
+        }
+    }
+
     using Smoother = linalg::solvers::Jacobi< Viscous >;
 
     std::vector< Smoother > smoothers;
     smoothers.reserve( num_levels );
+
+    // Estimate relaxation rates on every level.
+    logroot << "Estimating ralaxation rates for Jacobi smoother for the viscous block on each level." << std::endl;
     for ( int level = 0; level < num_levels; level++ )
     {
+        VectorQ1Vec< ScalarType > tmp_pi_0(
+            "tmp_pi_0" + std::to_string( level ), domains[level], ownership_mask_data[level] );
+        VectorQ1Vec< ScalarType > tmp_pi_1(
+            "tmp_pi_1" + std::to_string( level ), domains[level], ownership_mask_data[level] );
+        double max_ev = 0.0;
+        if ( level == num_levels - 1 )
+        {
+            linalg::DiagonallyScaledOperator inv_diag_A( K.block_11(), inverse_diagonals[level] );
+            max_ev = linalg::solvers::power_iteration( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
+        }
+        else
+        {
+            linalg::DiagonallyScaledOperator inv_diag_A( A_c[level], inverse_diagonals[level] );
+            max_ev = linalg::solvers::power_iteration( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
+        }
+        const auto omega_opt = 2.0 / ( 1.1 * max_ev );
+
+        logroot << " + level " << level << ": " << omega_opt << std::endl;
+
         smoothers.emplace_back(
             inverse_diagonals[level],
             prm.stokes_solver_parameters.viscous_pc_num_smoothing_steps_prepost,
             tmp_mg[level],
-            prm.stokes_solver_parameters.viscous_pc_omega );
+            omega_opt );
     }
 
     using CoarseGridSolver = linalg::solvers::PCG< Viscous >;
@@ -381,12 +479,43 @@ Result<> run( const Parameters& prm )
         prm.stokes_solver_parameters.viscous_pc_num_vcycles,
         1e-6 );
 
-    using PrecSchur = linalg::solvers::IdentitySolver< Stokes::Block22Type >;
-    PrecSchur prec_22;
+    // Schur complement: lumped inverse diagonal of pressure mass
 
-    using PrecStokes =
-        linalg::solvers::BlockDiagonalPreconditioner2x2< Stokes, Viscous, Stokes::Block22Type, PrecVisc, PrecSchur >;
-    PrecStokes prec_stokes( K.block_11(), K.block_22(), prec_11, prec_22 );
+    VectorQ1Scalar< ScalarType > k_pm( "k_pm", domains[pressure_level], ownership_mask_data[pressure_level] );
+    assign( k_pm, eta[pressure_level] );
+    linalg::invert_entries( k_pm );
+
+    using PressureMass = fe::wedge::operators::shell::KMass< ScalarType >;
+    PressureMass pmass(
+        domains[pressure_level], coords_shell[pressure_level], coords_radii[pressure_level], k_pm.grid_data(), false );
+    pmass.set_lumped_diagonal( true );
+    VectorQ1Scalar< ScalarType > lumped_diagonal_pmass(
+        "lumped_diagonal_pmass", domains[pressure_level], ownership_mask_data[pressure_level] );
+    {
+        VectorQ1Scalar< ScalarType > tmp(
+            "inverse_diagonal_tmp" + std::to_string( pressure_level ),
+            domains[pressure_level],
+            ownership_mask_data[pressure_level] );
+        linalg::assign( tmp, 1.0 );
+        linalg::apply( pmass, tmp, lumped_diagonal_pmass );
+    }
+
+    using PrecSchur = linalg::solvers::DiagonalSolver< PressureMass >;
+    PrecSchur inv_lumped_pmass( lumped_diagonal_pmass );
+
+    // Set up outer block-preconditioner
+
+    using PrecStokes = linalg::solvers::
+        BlockTriangularPreconditioner2x2< Stokes, Viscous, PressureMass, Gradient, PrecVisc, PrecSchur >;
+
+    VectorQ1IsoQ2Q1< ScalarType > triangular_prec_tmp(
+        "triangular_prec_tmp",
+        domains[velocity_level],
+        domains[pressure_level],
+        ownership_mask_data[velocity_level],
+        ownership_mask_data[pressure_level] );
+
+    PrecStokes prec_stokes( K.block_11(), pmass, K.block_12(), triangular_prec_tmp, prec_11, inv_lumped_pmass );
 
     linalg::solvers::FGMRES< Stokes, PrecStokes > stokes_fgmres(
         stokes_tmp_fgmres,
@@ -506,6 +635,7 @@ Result<> run( const Parameters& prm )
 
     xdmf_output.add( T.grid_data() );
     xdmf_output.add( u.block_1().grid_data() );
+    xdmf_output.add( eta[velocity_level].grid_data() );
 
     xdmf_output.write();
 
