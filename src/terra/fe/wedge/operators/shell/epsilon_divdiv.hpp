@@ -144,8 +144,8 @@ class EpsilonDivDiv
                 if ( diagonal_ and dimi != dimj )
                     continue;
 
-                ScalarType src_local_hex[8] = { { 0 } };
-                ScalarType dst_local_hex[8] = { { 0 } };
+                ScalarType src_local_hex[8] = { 0 };
+                ScalarType dst_local_hex[8] = { 0 };
 
                 constexpr int hex_offset_x[8] = { 0, 1, 0, 1, 0, 1, 0, 1 };
                 constexpr int hex_offset_y[8] = { 0, 0, 1, 1, 0, 0, 1, 1 };
@@ -198,72 +198,20 @@ class EpsilonDivDiv
                             div_j[k] = grad_j( dimj, dimj );
                         }
 
-                        if ( diagonal_ )
-                        {
-                            diagonal(
-                                src_local_hex,
-                                dst_local_hex,
-                                k_eval,
-                                wedge,
-                                quad_weight,
-                                abs_det,
-                                sym_grad_i,
-                                sym_grad_j,
-                                div_i,
-                                div_j,
-                                dimi,
-                                dimj );
-                        }
-                        else if ( treat_boundary_ && r_cell == 0 )
-                        {
-                            // Bottom boundary dirichlet
-                            dirichlet_cmb(
-                                src_local_hex,
-                                dst_local_hex,
-                                k_eval,
-                                wedge,
-                                quad_weight,
-                                abs_det,
-                                sym_grad_i,
-                                sym_grad_j,
-                                div_i,
-                                div_j,
-                                dimi,
-                                dimj );
-                        }
-                        else if ( treat_boundary_ && r_cell + 1 == radii_.extent( 1 ) - 1 )
-                        {
-                            // Top boundary dirichlet
-                            dirichlet_surface(
-                                src_local_hex,
-                                dst_local_hex,
-                                k_eval,
-                                wedge,
-                                quad_weight,
-                                abs_det,
-                                sym_grad_i,
-                                sym_grad_j,
-                                div_i,
-                                div_j,
-                                dimi,
-                                dimj );
-                        }
-                        else
-                        {
-                            neumann(
-                                src_local_hex,
-                                dst_local_hex,
-                                k_eval,
-                                wedge,
-                                quad_weight,
-                                abs_det,
-                                sym_grad_i,
-                                sym_grad_j,
-                                div_i,
-                                div_j,
-                                dimi,
-                                dimj );
-                        }
+                        fused_local_mv(
+                            src_local_hex,
+                            dst_local_hex,
+                            k_eval,
+                            wedge,
+                            quad_weight,
+                            abs_det,
+                            sym_grad_i,
+                            sym_grad_j,
+                            div_i,
+                            div_j,
+                            dimi,
+                            dimj,
+                            r_cell );
                     }
                 }
 
@@ -286,7 +234,7 @@ class EpsilonDivDiv
         }
     }
 
-    KOKKOS_INLINE_FUNCTION void neumann(
+    KOKKOS_INLINE_FUNCTION void fused_local_mv(
         ScalarType                      src_local_hex[8],
         ScalarType                      dst_local_hex[8],
         const ScalarType                k_eval,
@@ -298,73 +246,62 @@ class EpsilonDivDiv
         ScalarType                      div_i[num_nodes_per_wedge],
         ScalarType                      div_j[num_nodes_per_wedge],
         const int                       dimi,
-        const int                       dimj ) const
+        const int                       dimj,
+        int                             r_cell ) const
     {
         constexpr int offset_x[2][6] = { { 0, 1, 0, 0, 1, 0 }, { 1, 0, 1, 1, 0, 1 } };
         constexpr int offset_y[2][6] = { { 0, 0, 1, 0, 0, 1 }, { 1, 1, 0, 1, 1, 0 } };
         constexpr int offset_r[2][6] = { { 0, 0, 0, 1, 1, 1 }, { 0, 0, 0, 1, 1, 1 } };
 
-        // 3. Compute ∇u at this quadrature point.
         dense::Mat< ScalarType, 3, 3 > grad_u;
         ScalarType                     divu = 0.0;
         grad_u.fill( 0.0 );
-        for ( int i = 0; i < num_nodes_per_wedge; i++ )
+
+        int        start      = 0;
+        int        end        = num_nodes_per_wedge;
+        const bool at_cmb     = r_cell == 0;
+        const bool at_surface = ( r_cell + 1 == radii_.extent( 1 ) - 1 );
+
+
+        // Compute ∇u at this quadrature point.
+        if ( !diagonal_ )
         {
-            grad_u = grad_u + sym_grad_i[i] *
-                                  src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
-            divu += div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
+            if ( treat_boundary_ && at_cmb )
+            {
+                // at the core-mantle boundary, we exclude dofs that are lower-indexed than the dof on the boundary
+                start = 3;
+            }
+            else if ( treat_boundary_ && at_surface )
+            {
+                // at the surface boundary, we exclude dofs that are higher-indexed than the dof on the boundary 
+                end = 3;
+            }
+
+            // accumulate the element-local gradient/divergence of the trial function (loop over columns of local matrix/local dofs)
+            for ( int i = start; i < end; i++ )
+            {
+                grad_u =
+                    grad_u +
+                    sym_grad_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
+                divu += div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
+            }
+
+            // Add the test function contributions.
+            // for each row of the local matrix (test-functions):
+            // dot trial part (fully assembled for the current element from loop above) with test part corresponding to the current row/dof
+            // += due to contributions from other elements
+            for ( int j = start; j < end; j++ )
+            {
+                dst_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]] +=
+                    quad_weight * k_eval * abs_det *
+                    ( 2 * ( sym_grad_j[j] ).double_contract( grad_u ) - 2.0 / 3.0 * div_j[j] * divu );
+            }
         }
 
-        // 4. Add the test function contributions.
-        for ( int j = 0; j < num_nodes_per_wedge; j++ )
+        // Dirichlet DoFs are only to be eliminated on diagonal blocks of epsilon
+        if ( diagonal_ || ( dimi == dimj && treat_boundary_ && ( at_cmb || at_surface ) ) )
         {
-            dst_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]] +=
-                quad_weight * k_eval * abs_det *
-                ( 2 * ( sym_grad_j[j] ).double_contract( grad_u ) - 2.0 / 3.0 * div_j[j] * divu );
-        }
-    }
-
-    KOKKOS_INLINE_FUNCTION void dirichlet_cmb(
-        ScalarType                      src_local_hex[8],
-        ScalarType                      dst_local_hex[8],
-        const ScalarType                k_eval,
-        const int                       wedge,
-        const ScalarType                quad_weight,
-        const ScalarType                abs_det,
-        dense::Mat< ScalarType, 3, 3 >* sym_grad_i,
-        dense::Mat< ScalarType, 3, 3 >* sym_grad_j,
-        ScalarType                      div_i[num_nodes_per_wedge],
-        ScalarType                      div_j[num_nodes_per_wedge],
-        const int                       dimi,
-        const int                       dimj ) const
-    {
-        constexpr int offset_x[2][6] = { { 0, 1, 0, 0, 1, 0 }, { 1, 0, 1, 1, 0, 1 } };
-        constexpr int offset_y[2][6] = { { 0, 0, 1, 0, 0, 1 }, { 1, 1, 0, 1, 1, 0 } };
-        constexpr int offset_r[2][6] = { { 0, 0, 0, 1, 1, 1 }, { 0, 0, 0, 1, 1, 1 } };
-
-        // 3. Compute ∇u at this quadrature point.
-        dense::Mat< ScalarType, 3, 3 > grad_u;
-        ScalarType                     divu = 0.0;
-        grad_u.fill( 0.0 );
-        for ( int i = 3; i < num_nodes_per_wedge; i++ )
-        {
-            grad_u = grad_u + sym_grad_i[i] *
-                                  src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
-            divu += div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
-        }
-
-        // 4. Add the test function contributions.
-        for ( int j = 3; j < num_nodes_per_wedge; j++ )
-        {
-            dst_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]] +=
-                quad_weight * k_eval * abs_det *
-                ( 2 * ( sym_grad_j[j] ).double_contract( grad_u ) - 2.0 / 3.0 * div_j[j] * divu );
-        }
-
-        // Diagonal for top part
-        if ( dimi == dimj )
-        {
-            for ( int i = 0; i < 3; i++ )
+            for ( int i = ( at_cmb ? 0 : 3 ); i < ( at_cmb ? 3 : num_nodes_per_wedge ); i++ )
             {
                 const auto grad_u_diag =
                     sym_grad_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
@@ -375,92 +312,6 @@ class EpsilonDivDiv
                     quad_weight * k_eval * abs_det *
                     ( 2 * ( sym_grad_j[i] ).double_contract( grad_u_diag ) - 2.0 / 3.0 * div_j[i] * div_u_diag );
             }
-        }
-    }
-
-    KOKKOS_INLINE_FUNCTION void dirichlet_surface(
-        ScalarType                      src_local_hex[8],
-        ScalarType                      dst_local_hex[8],
-        const ScalarType                k_eval,
-        const int                       wedge,
-        const ScalarType                quad_weight,
-        const ScalarType                abs_det,
-        dense::Mat< ScalarType, 3, 3 >* sym_grad_i,
-        dense::Mat< ScalarType, 3, 3 >* sym_grad_j,
-        ScalarType                      div_i[num_nodes_per_wedge],
-        ScalarType                      div_j[num_nodes_per_wedge],
-        const int                       dimi,
-        const int                       dimj ) const
-    {
-        constexpr int offset_x[2][6] = { { 0, 1, 0, 0, 1, 0 }, { 1, 0, 1, 1, 0, 1 } };
-        constexpr int offset_y[2][6] = { { 0, 0, 1, 0, 0, 1 }, { 1, 1, 0, 1, 1, 0 } };
-        constexpr int offset_r[2][6] = { { 0, 0, 0, 1, 1, 1 }, { 0, 0, 0, 1, 1, 1 } };
-
-        // 3. Compute ∇u at this quadrature point.
-        dense::Mat< ScalarType, 3, 3 > grad_u;
-        ScalarType                     divu = 0.0;
-        grad_u.fill( 0.0 );
-        for ( int i = 0; i < 3; i++ )
-        {
-            grad_u = grad_u + sym_grad_i[i] *
-                                  src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
-            divu += div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
-        }
-
-        // 4. Add the test function contributions.
-        for ( int j = 0; j < 3; j++ )
-        {
-            dst_local_hex[4 * offset_r[wedge][j] + 2 * offset_y[wedge][j] + offset_x[wedge][j]] +=
-                quad_weight * k_eval * abs_det *
-                ( 2 * ( sym_grad_j[j] ).double_contract( grad_u ) - 2.0 / 3.0 * div_j[j] * divu );
-        }
-
-        // Diagonal for top part
-        if ( dimi == dimj )
-        {
-            for ( int i = 3; i < num_nodes_per_wedge; i++ )
-            {
-                const auto grad_u_diag =
-                    sym_grad_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
-                const auto div_u_diag =
-                    div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
-
-                dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
-                    quad_weight * k_eval * abs_det *
-                    ( 2 * ( sym_grad_j[i] ).double_contract( grad_u_diag ) - 2.0 / 3.0 * div_j[i] * div_u_diag );
-            }
-        }
-    }
-
-    KOKKOS_INLINE_FUNCTION void diagonal(
-        ScalarType                      src_local_hex[8],
-        ScalarType                      dst_local_hex[8],
-        const ScalarType                k_eval,
-        const int                       wedge,
-        const ScalarType                quad_weight,
-        const ScalarType                abs_det,
-        dense::Mat< ScalarType, 3, 3 >* sym_grad_i,
-        dense::Mat< ScalarType, 3, 3 >* sym_grad_j,
-        ScalarType                      div_i[num_nodes_per_wedge],
-        ScalarType                      div_j[num_nodes_per_wedge],
-        const int                       dimi,
-        const int                       dimj ) const
-    {
-        constexpr int offset_x[2][6] = { { 0, 1, 0, 0, 1, 0 }, { 1, 0, 1, 1, 0, 1 } };
-        constexpr int offset_y[2][6] = { { 0, 0, 1, 0, 0, 1 }, { 1, 1, 0, 1, 1, 0 } };
-        constexpr int offset_r[2][6] = { { 0, 0, 0, 1, 1, 1 }, { 0, 0, 0, 1, 1, 1 } };
-
-        // 3. Compute ∇u at this quadrature point.
-        for ( int i = 0; i < num_nodes_per_wedge; i++ )
-        {
-            const auto grad_u_diag =
-                sym_grad_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
-            const auto div_u_diag =
-                div_i[i] * src_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]];
-
-            dst_local_hex[4 * offset_r[wedge][i] + 2 * offset_y[wedge][i] + offset_x[wedge][i]] +=
-                quad_weight * k_eval * abs_det *
-                ( 2 * ( sym_grad_j[i] ).double_contract( grad_u_diag ) - 2.0 / 3.0 * div_j[i] * div_u_diag );
         }
     }
 };
