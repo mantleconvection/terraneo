@@ -47,7 +47,7 @@ concept OperatorLike = requires(
 };
 
 /// @brief Concept for types that can be used as Galerkin coarse-grid operators in a multigrid hierarchy.
-/// Requires vector types, matvec implementation, and compatibility with VectorLike.
+/// See galerkin_coarsening_linear.hpp for more information on GCA.
 template < typename Op >
 concept GCACapable = requires(
     // dummy variables to define requirements
