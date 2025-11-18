@@ -358,7 +358,6 @@ Result<> run( const Parameters& prm )
         eta[velocity_level].grid_data(),
         false,
         false );
-    K_neumann.block_11().store_lmatrices();
 
     ViscousMass M( domains[velocity_level], coords_shell[velocity_level], coords_radii[velocity_level], false );
 
@@ -390,7 +389,7 @@ Result<> run( const Parameters& prm )
         {
             A_c.emplace_back(
                 domains[level], coords_shell[level], coords_radii[level], eta[level].grid_data(), true, false );
-            A_c.back().store_lmatrices();
+            A_c.back().allocate_local_matrix_memory();
             P.emplace_back( linalg::OperatorApplyMode::Add );
             R.emplace_back( domains[level] );
         }
@@ -406,15 +405,10 @@ Result<> run( const Parameters& prm )
         for ( int level = num_levels - 2; level >= 0; level-- )
         {
             std::cout << "Assembling GCA on level " << level << std::endl;
-            for ( int dimi = 0; dimi < 3; dimi++ )
-            {
-                for ( int dimj = 0; dimj < 3; dimj++ )
-                {
-                    // std::cout << "Component (" << dimi << ", " << dimj << ")" << std::endl;
-                    fe::wedge::operators::shell::TwoGridGCA< ScalarType, Viscous >(
-                        ( level == num_levels - 2 ) ? K_neumann.block_11() : A_c[level + 1], A_c[level], dimi, dimj );
-                }
-            }
+
+            // std::cout << "Component (" << dimi << ", " << dimj << ")" << std::endl;
+            fe::wedge::operators::shell::TwoGridGCA< ScalarType, Viscous >(
+                ( level == num_levels - 2 ) ? K_neumann.block_11() : A_c[level + 1], A_c[level] );
         }
     }
 

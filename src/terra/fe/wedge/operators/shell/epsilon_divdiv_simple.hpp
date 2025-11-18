@@ -107,7 +107,7 @@ class EpsilonDivDivSimple
         return ijslice;
     }
 
-    /// @brief Retrives the local matrix stored in the operator
+    /// @brief Set the local matrix stored in the operator
     KOKKOS_INLINE_FUNCTION
     void set_lmatrix(
         const int                   local_subdomain_id,

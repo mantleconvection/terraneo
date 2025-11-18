@@ -325,7 +325,6 @@ std::tuple< double, double, int > test( int min_level, int max_level, const std:
         k.grid_data(),
         false,
         false );
-    K_neumann.block_11().store_lmatrices();
 
     Stokes K_neumann_diag(
         domains[velocity_level],
@@ -361,7 +360,7 @@ std::tuple< double, double, int > test( int min_level, int max_level, const std:
         if ( level < num_levels - 1 )
         {
             A_c.emplace_back( domains[level], coords_shell[level], coords_radii[level], k_c.grid_data(), true, false );
-            A_c.back().store_lmatrices();
+            A_c.back().allocate_local_matrix_memory();
             P.emplace_back( coords_shell[level + 1], coords_radii[level + 1], linalg::OperatorApplyMode::Add );
             R.emplace_back( domains[level], coords_shell[level + 1], coords_radii[level + 1] );
         }
@@ -422,7 +421,7 @@ std::tuple< double, double, int > test( int min_level, int max_level, const std:
     // Multigrid preconditioner for velocity block
 
     // setup gca coarse ops
-    if ( false )
+    if ( true )
     {
         for ( int level = num_levels - 2; level >= 0; level-- )
         {
@@ -431,7 +430,6 @@ std::tuple< double, double, int > test( int min_level, int max_level, const std:
             {
                 for ( int dimj = 0; dimj < 3; dimj++ )
                 {
-                    // std::cout << "Component (" << dimi << ", " << dimj << ")" << std::endl;
                     TwoGridGCA< ScalarType, Viscous >(
                         ( level == num_levels - 2 ) ? K_neumann.block_11() : A_c[level + 1], A_c[level], dimi, dimj );
                 }
@@ -643,7 +641,7 @@ int main( int argc, char** argv )
 {
     util::terra_initialize( &argc, &argv );
 
-    const int max_level = 4;
+    const int max_level = 5;
     auto      table     = std::make_shared< util::Table >();
 
     double prev_l2_error_vel = 1.0;

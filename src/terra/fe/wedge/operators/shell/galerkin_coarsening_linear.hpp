@@ -4,7 +4,7 @@
 
 #include "communication/shell/communication.hpp"
 #include "dense/vec.hpp"
-#include "fe/wedge/operators/shell/epsilon_divdiv_simple.hpp"
+#include "fe/wedge/operators/shell/epsilon_divdiv.hpp"
 #include "fe/wedge/shell/grid_transfer_linear.hpp"
 #include "grid/grid_types.hpp"
 #include "linalg/operator.hpp"
@@ -21,7 +21,7 @@ namespace terra::fe::wedge::operators::shell {
 /// triple-product P^TAP with the fine-operator local matrix A and adds the resulting gca matrix
 /// up for all fine wedges comprising the coarse wedge. Finally, it stores the result in the
 /// wedge-wise matrix storage of the coarse operator.
-template < typename ScalarT, typename Operator >
+template < typename ScalarT, terra::linalg::GCACapable Operator >
 class TwoGridGCA
 {
   public:
@@ -138,7 +138,7 @@ class TwoGridGCA
         dense::Vec< int, 4 > coarse_hex_idx_fine = {
             local_subdomain_id, 2 * x_coarse_idx, 2 * y_coarse_idx, 2 * r_coarse_idx };
 
-        dense::Mat< ScalarT, 6, 6 > A_coarse[num_wedges_per_hex_cell] = {};
+        dense::Mat< ScalarT, Operator::LocalMatrixDim, Operator::LocalMatrixDim > A_coarse[num_wedges_per_hex_cell] = {};
         // loop finer hexes of our coarse hex
         for ( int fine_hex_lidx = 0; fine_hex_lidx < 8; fine_hex_lidx++ )
         {
@@ -280,27 +280,32 @@ class TwoGridGCA
                     P( fine_dof_lidx, coarse_dof_lindices[3] ) = weights( 1 );
                 }
 
-                dense::Mat< ScalarT, 6, 6 > A_fine;
-                if constexpr ( std::is_same< Operator, EpsilonDivDivSimple< double > >::value )
-                {
-                    A_fine = fine_op_.get_lmatrix(
-                        local_subdomain_id,
-                        fine_hex_idx( 1 ),
-                        fine_hex_idx( 2 ),
-                        fine_hex_idx( 3 ),
-                        wedge,
-                        dimi_,
-                        dimj_ );
-                }
-                else
-                {
-                    A_fine = fine_op_.get_lmatrix(
-                        local_subdomain_id, fine_hex_idx( 1 ), fine_hex_idx( 2 ), fine_hex_idx( 3 ), wedge );
-                }
+                dense::Mat< ScalarT, Operator::LocalMatrixDim, Operator::LocalMatrixDim > A_fine = fine_op_.get_local_matrix(
+                    local_subdomain_id, fine_hex_idx( 1 ), fine_hex_idx( 2 ), fine_hex_idx( 3 ), wedge );
 
                 // core part: assemble local gca matrix by mapping from coarse wedge to current fine wedge,
                 // applying the corresponding local operator and mapping back.
-                auto PAP = P.transposed() * A_fine * P;
+                dense::Mat< ScalarT, Operator::LocalMatrixDim, Operator::LocalMatrixDim > P_vec = { 0 };
+                if constexpr ( Operator::LocalMatrixDim == 18 )
+                {
+                    // in a vectorial operator we need to setup a vectorial interpolation
+                    for ( int dim = 0; dim < 3; ++dim )
+                    {
+                        for ( int i = 0; i < 6; ++i )
+                        {
+                            for ( int j = 0; j < 6; ++j )
+                            {
+                                P_vec( i + dim * num_nodes_per_wedge, j + dim * num_nodes_per_wedge ) = P( i, j );
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    Kokkos::abort( "Not implemented." );
+                }
+                dense::Mat< ScalarT, Operator::LocalMatrixDim, Operator::LocalMatrixDim > PTAP =
+                    P_vec.transposed() * A_fine * P_vec;
 
                 // correctly add to gca coarsened matrix
                 // depending on the fine hex and wedge, we are located on the coarse 0 or 1 wedge
@@ -309,14 +314,14 @@ class TwoGridGCA
                                        fine_hex_lidx == 4 || fine_hex_lidx == 5 || fine_hex_lidx == 6 ) ) or
                      ( wedge == 1 && ( fine_hex_lidx == 0 || fine_hex_lidx == 4 ) ) )
                 {
-                    A_coarse[0] += PAP;
+                    A_coarse[0] += PTAP;
                 }
                 else if (
                     ( wedge == 1 && ( fine_hex_lidx == 1 || fine_hex_lidx == 2 || fine_hex_lidx == 3 ||
                                       fine_hex_lidx == 5 || fine_hex_lidx == 6 || fine_hex_lidx == 7 ) ) or
                     ( wedge == 0 && ( fine_hex_lidx == 3 || fine_hex_lidx == 7 ) ) )
                 {
-                    A_coarse[1] += PAP;
+                    A_coarse[1] += PTAP;
                 }
                 else
                 {
@@ -327,53 +332,57 @@ class TwoGridGCA
 
         if ( treat_boundary_ )
         {
+            dense::Mat< ScalarT, Operator::LocalMatrixDim, Operator::LocalMatrixDim > boundary_mask;
+            boundary_mask.fill( 1.0 );
+
+            for ( int dimi = 0; dimi < 3; ++dimi )
+            {
+                for ( int dimj = 0; dimj < 3; ++dimj )
+                {
+                    if ( r_coarse_idx == 0 )
+                    {
+                        // Inner boundary (CMB).
+                        for ( int i = 0; i < num_nodes_per_wedge; i++ )
+                        {
+                            for ( int j = 0; j < num_nodes_per_wedge; j++ )
+                            {
+                                if ( ( dimi_ == dimj_ && i != j && ( i < 3 || j < 3 ) ) or
+                                     ( dimi_ != dimj_ && ( i < 3 || j < 3 ) ) )
+                                {
+                                    boundary_mask( i + dimi * num_nodes_per_wedge, j + dimj * num_nodes_per_wedge ) = 0.0;
+                                }
+                            }
+                        }
+                    }
+
+                    if ( r_coarse_idx + 1 == radii_coarse_.extent( 1 ) - 1 )
+                    {
+                        // Outer boundary (surface).
+                        for ( int i = 0; i < num_nodes_per_wedge; i++ )
+                        {
+                            for ( int j = 0; j < num_nodes_per_wedge; j++ )
+                            {
+                                if ( ( dimi_ == dimj_ && i != j && ( i >= 3 || j >= 3 ) ) or
+                                     ( dimi_ != dimj_ && ( i >= 3 || j >= 3 ) ) )
+                                {
+                                    boundary_mask( i + dimi * num_nodes_per_wedge, j + dimj * num_nodes_per_wedge ) = 0.0;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             for ( int wedge = 0; wedge < num_wedges_per_hex_cell; wedge++ )
             {
-                dense::Mat< ScalarT, 6, 6 > boundary_mask;
-                boundary_mask.fill( 1.0 );
-                if ( r_coarse_idx == 0 )
-                {
-                    // Inner boundary (CMB).
-                    for ( int i = 0; i < 6; i++ )
-                    {
-                        for ( int j = 0; j < 6; j++ )
-                        {
-                            if ( ( dimi_ == dimj_ && i != j && ( i < 3 || j < 3 ) ) or
-                                 ( dimi_ != dimj_ && ( i < 3 || j < 3 ) ) )
-                            {
-                                boundary_mask( i, j ) = 0.0;
-                            }
-                        }
-                    }
-                }
-
-                if ( r_coarse_idx + 1 == radii_coarse_.extent( 1 ) - 1 )
-                {
-                    // Outer boundary (surface).
-                    for ( int i = 0; i < 6; i++ )
-                    {
-                        for ( int j = 0; j < 6; j++ )
-                        {
-                            if ( ( dimi_ == dimj_ && i != j && ( i >= 3 || j >= 3 ) ) or
-                                 ( dimi_ != dimj_ && ( i >= 3 || j >= 3 ) ) )
-                            {
-                                boundary_mask( i, j ) = 0.0;
-                            }
-                        }
-                    }
-                }
-
                 A_coarse[wedge].hadamard_product( boundary_mask );
             }
         }
 
-        if constexpr ( std::is_same< Operator, EpsilonDivDivSimple< double > >::value )
+        if constexpr ( std::is_same< Operator, EpsilonDivDiv< double > >::value )
         {
             // store coarse matrices
-            coarse_op_.set_lmatrix(
-                local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 0, dimi_, dimj_, A_coarse[0] );
-            coarse_op_.set_lmatrix(
-                local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 1, dimi_, dimj_, A_coarse[1] );
+            coarse_op_.set_local_matrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 0, A_coarse[0] );
+            coarse_op_.set_local_matrix( local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 1, A_coarse[1] );
         }
         else
         {

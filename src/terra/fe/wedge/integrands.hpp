@@ -661,4 +661,22 @@ KOKKOS_INLINE_FUNCTION constexpr dense::Mat< T, 3, 3 >
         p_phy[0], p_phy[1], p_phy[2], r_1, r_2, xi_eta_zeta_fine( 0 ), xi_eta_zeta_fine( 1 ), xi_eta_zeta_fine( 2 ) );
 }
 
+/// @brief Returns the symmetric gradient of the shape function of a dof at a quadrature point.
+///
+/// @param J_inv_transposed       inverse transposed jacobian to map to physical element
+/// @param quad_point             quadrature point on the reference element
+/// @param dof                    local index of the shape function a wedge
+/// @param dim                    dimension of the vectorial shape function, of which the gradient should be computed
+template < std::floating_point T >
+KOKKOS_INLINE_FUNCTION constexpr dense::Mat< T, 3, 3 > symmetric_grad(
+    const dense::Mat< T, 3, 3 >& J_inv_transposed,
+    const dense::Vec< T, 3 >&    quad_point,
+    const int                    dof,
+    const int                    dim )
+{
+    dense::Mat< T, 3, 3 > grad =
+        J_inv_transposed * dense::Mat< T, 3, 3 >::from_single_col_vec( grad_shape( dof, quad_point ), dim );
+    return ( grad + grad.transposed() ) * 0.5;
+}
+
 } // namespace terra::fe::wedge
