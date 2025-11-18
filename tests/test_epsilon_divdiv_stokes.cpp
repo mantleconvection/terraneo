@@ -360,7 +360,7 @@ std::tuple< double, double, int > test( int min_level, int max_level, const std:
         if ( level < num_levels - 1 )
         {
             A_c.emplace_back( domains[level], coords_shell[level], coords_radii[level], k_c.grid_data(), true, false );
-            A_c.back().allocate_lmatrix_memory();
+            A_c.back().allocate_local_matrix_memory();
             P.emplace_back( coords_shell[level + 1], coords_radii[level + 1], linalg::OperatorApplyMode::Add );
             R.emplace_back( domains[level], coords_shell[level + 1], coords_radii[level + 1] );
         }

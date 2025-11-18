@@ -56,7 +56,9 @@ concept GCACapable = requires(
     const int                                          x_cell,
     const int                                          y_cell,
     const int                                          r_cell,
+    // 0 or 1 wedge within the hex cell on which GCA operates
     const int                                          wedge,
+    // vectorial dimensions of the diffusion operator 
     const int                                          dimi,
     const int                                          dimj,
     const dense::Mat< typename Op::ScalarType, 6, 6 >& mat ) {
@@ -66,9 +68,9 @@ concept GCACapable = requires(
 
     // The operator must allow read/write access to his local matrices in order to GCA them
     {
-        self.get_lmatrix( local_subdomain_id, x_cell, y_cell, r_cell, wedge, dimi, dimj )
+        self.get_local_matrix( local_subdomain_id, x_cell, y_cell, r_cell, wedge, dimi, dimj )
     } -> std::same_as< dense::Mat< typename Op::ScalarType, 6, 6 > >;
-    { self.set_lmatrix( local_subdomain_id, x_cell, y_cell, r_cell, wedge, dimi, dimj, mat ) } -> std::same_as< void >;
+    { self.set_local_matrix( local_subdomain_id, x_cell, y_cell, r_cell, wedge, dimi, dimj, mat ) } -> std::same_as< void >;
 
     // Since TwoGridGCA works with multiple operators, and their respective domains (coarse-fine nested loop),
     // it is required to have access to geometric information stored in the operators.

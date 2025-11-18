@@ -103,7 +103,7 @@ class EpsilonDivDiv
     grid::Grid3DDataVec< ScalarT, 3 >& get_grid() { return grid_; }
 
     /// @brief allocates memory for the local matrices
-    void allocate_lmatrix_memory()
+    void allocate_local_matrix_memory()
     {
         if ( lmatrices_.data() == nullptr )
         {
@@ -118,7 +118,7 @@ class EpsilonDivDiv
 
     /// @brief Set the local matrix stored in the operator
     KOKKOS_INLINE_FUNCTION
-    void set_lmatrix(
+    void set_local_matrix(
         const int                          local_subdomain_id,
         const int                          x_cell,
         const int                          y_cell,
@@ -143,7 +143,7 @@ class EpsilonDivDiv
     /// if there is stored local matrices, the desired local matrix is loaded and returned
     /// if not, the local matrix is assembled on-the-fly
     KOKKOS_INLINE_FUNCTION
-    dense::Mat< ScalarT, 6, 6 > get_lmatrix(
+    dense::Mat< ScalarT, 6, 6 > get_local_matrix(
         const int local_subdomain_id,
         const int x_cell,
         const int y_cell,

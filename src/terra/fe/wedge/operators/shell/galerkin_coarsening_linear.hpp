@@ -283,7 +283,7 @@ class TwoGridGCA
                 dense::Mat< ScalarT, 6, 6 > A_fine;
                 if constexpr ( std::is_same< Operator, EpsilonDivDiv< double > >::value )
                 {
-                    A_fine = fine_op_.get_lmatrix(
+                    A_fine = fine_op_.get_local_matrix(
                         local_subdomain_id,
                         fine_hex_idx( 1 ),
                         fine_hex_idx( 2 ),
@@ -294,7 +294,7 @@ class TwoGridGCA
                 }
                 else
                 {
-                    A_fine = fine_op_.get_lmatrix(
+                    A_fine = fine_op_.get_local_matrix(
                         local_subdomain_id, fine_hex_idx( 1 ), fine_hex_idx( 2 ), fine_hex_idx( 3 ), wedge );
                 }
 
@@ -370,9 +370,9 @@ class TwoGridGCA
         if constexpr ( std::is_same< Operator, EpsilonDivDiv< double > >::value )
         {
             // store coarse matrices
-            coarse_op_.set_lmatrix(
+            coarse_op_.set_local_matrix(
                 local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 0, dimi_, dimj_, A_coarse[0] );
-            coarse_op_.set_lmatrix(
+            coarse_op_.set_local_matrix(
                 local_subdomain_id, x_coarse_idx, y_coarse_idx, r_coarse_idx, 1, dimi_, dimj_, A_coarse[1] );
         }
         else
