@@ -20,8 +20,8 @@ class EpsilonDivDiv
     using SrcVectorType           = linalg::VectorQ1Vec< ScalarT, VecDim >;
     using DstVectorType           = linalg::VectorQ1Vec< ScalarT, VecDim >;
     using ScalarType              = ScalarT;
-    static constexpr int LocalDim = 18;
-    using Grid4DDataLocalMatrices = terra::grid::Grid4DDataMatrices< ScalarType, LocalDim, LocalDim, 2 >;
+    static constexpr int LocalMatrixDim = 18;
+    using Grid4DDataLocalMatrices = terra::grid::Grid4DDataMatrices< ScalarType, LocalMatrixDim, LocalMatrixDim, 2 >;
 
   private:
     bool apply_stored_lmatrices_ =
@@ -125,12 +125,12 @@ class EpsilonDivDiv
         const int                                        y_cell,
         const int                                        r_cell,
         const int                                        wedge,
-        const dense::Mat< ScalarT, LocalDim, LocalDim >& mat ) const
+        const dense::Mat< ScalarT, LocalMatrixDim, LocalMatrixDim >& mat ) const
     {
         assert( lmatrices_.data() != nullptr );
-        for ( int i = 0; i < LocalDim; ++i )
+        for ( int i = 0; i < LocalMatrixDim; ++i )
         {
-            for ( int j = 0; j < LocalDim; ++j )
+            for ( int j = 0; j < LocalMatrixDim; ++j )
             {
                 lmatrices_( local_subdomain_id, x_cell, y_cell, r_cell, wedge )( i, j ) = mat( i, j );
             }
@@ -141,7 +141,7 @@ class EpsilonDivDiv
     /// if there is stored local matrices, the desired local matrix is loaded and returned
     /// if not, the local matrix is assembled on-the-fly
     KOKKOS_INLINE_FUNCTION
-    dense::Mat< ScalarT, LocalDim, LocalDim > get_local_matrix(
+    dense::Mat< ScalarT, LocalMatrixDim, LocalMatrixDim > get_local_matrix(
         const int local_subdomain_id,
         const int x_cell,
         const int y_cell,
@@ -150,10 +150,10 @@ class EpsilonDivDiv
     {
         if ( lmatrices_.data() != nullptr )
         {
-            dense::Mat< ScalarT, LocalDim, LocalDim > ijslice;
-            for ( int i = 0; i < LocalDim; ++i )
+            dense::Mat< ScalarT, LocalMatrixDim, LocalMatrixDim > ijslice;
+            for ( int i = 0; i < LocalMatrixDim; ++i )
             {
-                for ( int j = 0; j < LocalDim; ++j )
+                for ( int j = 0; j < LocalMatrixDim; ++j )
                 {
                     ijslice( i, j ) = lmatrices_( local_subdomain_id, x_cell, y_cell, r_cell, wedge )( i, j );
                 }
@@ -263,7 +263,7 @@ class EpsilonDivDiv
         if ( lmatrices_.data() != nullptr )
         {
             // Compute the local element matrix.
-            dense::Mat< ScalarT, LocalDim, LocalDim > A[num_wedges_per_hex_cell] = { 0 };
+            dense::Mat< ScalarT, LocalMatrixDim, LocalMatrixDim > A[num_wedges_per_hex_cell] = { 0 };
             A[0] =// assemble_local_matrix( local_subdomain_id, x_cell, y_cell, r_cell, 0 );
             lmatrices_( local_subdomain_id, x_cell, y_cell, r_cell, 0 );
             A[1] = //assemble_local_matrix( local_subdomain_id, x_cell, y_cell, r_cell, 1 );
@@ -402,7 +402,7 @@ class EpsilonDivDiv
     /// @brief assemble the local matrix and return it for a given element, wedge, and vectorial component
     /// (determined by dimi, dimj)
     KOKKOS_INLINE_FUNCTION
-    dense::Mat< ScalarT, LocalDim, LocalDim > assemble_local_matrix(
+    dense::Mat< ScalarT, LocalMatrixDim, LocalMatrixDim > assemble_local_matrix(
         const int local_subdomain_id,
         const int x_cell,
         const int y_cell,
@@ -422,7 +422,7 @@ class EpsilonDivDiv
         extract_local_wedge_scalar_coefficients( k_local_hex, local_subdomain_id, x_cell, y_cell, r_cell, k_ );
 
         // Compute the local element matrix.
-        dense::Mat< ScalarT, LocalDim, LocalDim > A = { 0 };
+        dense::Mat< ScalarT, LocalMatrixDim, LocalMatrixDim > A = { 0 };
         for ( int dimi = 0; dimi < 3; ++dimi )
         {
             for ( int dimj = 0; dimj < 3; ++dimj )
@@ -464,7 +464,7 @@ class EpsilonDivDiv
 
         if ( treat_boundary_ )
         {
-            dense::Mat< ScalarT, LocalDim, LocalDim > boundary_mask;
+            dense::Mat< ScalarT, LocalMatrixDim, LocalMatrixDim > boundary_mask;
             boundary_mask.fill( 1.0 );
 
             for ( int dimi = 0; dimi < 3; ++dimi )

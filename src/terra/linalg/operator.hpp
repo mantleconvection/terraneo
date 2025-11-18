@@ -58,19 +58,19 @@ concept GCACapable = requires(
     const int r_cell,
     // 0 or 1 wedge within the hex cell on which GCA operates
     const int wedge,
-    const dense::Mat< typename Op::ScalarType, Op::LocalDim, Op::LocalDim >& mat ) {
-        
+    const dense::Mat< typename Op::ScalarType, Op::LocalMatrixDim, Op::LocalMatrixDim >& mat ) {
+
     // Require that the argument to be a linear operator
     requires OperatorLike< Op >;
 
     // dimensions of the local matrix (might be 18 for vectorial diffusion ops in 3D like EpsilonDivDiv,
     //  or 6 for a simple scalar div-k-grad)
-    { Op::LocalDim } -> std::convertible_to<int>;
+    { Op::LocalMatrixDim } -> std::convertible_to<int>;
 
     // The operator must allow read/write access to his local matrices in order to GCA them
     {
         self.get_local_matrix( local_subdomain_id, x_cell, y_cell, r_cell, wedge )
-    } -> std::same_as< dense::Mat< typename Op::ScalarType, Op::LocalDim, Op::LocalDim > >;
+    } -> std::same_as< dense::Mat< typename Op::ScalarType, Op::LocalMatrixDim, Op::LocalMatrixDim > >;
 
     {
         self.set_local_matrix( local_subdomain_id, x_cell, y_cell, r_cell, wedge, mat )

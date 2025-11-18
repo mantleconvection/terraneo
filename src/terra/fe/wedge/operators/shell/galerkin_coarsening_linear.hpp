@@ -138,7 +138,7 @@ class TwoGridGCA
         dense::Vec< int, 4 > coarse_hex_idx_fine = {
             local_subdomain_id, 2 * x_coarse_idx, 2 * y_coarse_idx, 2 * r_coarse_idx };
 
-        dense::Mat< ScalarT, Operator::LocalDim, Operator::LocalDim > A_coarse[num_wedges_per_hex_cell] = {};
+        dense::Mat< ScalarT, Operator::LocalMatrixDim, Operator::LocalMatrixDim > A_coarse[num_wedges_per_hex_cell] = {};
         // loop finer hexes of our coarse hex
         for ( int fine_hex_lidx = 0; fine_hex_lidx < 8; fine_hex_lidx++ )
         {
@@ -280,13 +280,13 @@ class TwoGridGCA
                     P( fine_dof_lidx, coarse_dof_lindices[3] ) = weights( 1 );
                 }
 
-                dense::Mat< ScalarT, Operator::LocalDim, Operator::LocalDim > A_fine = fine_op_.get_local_matrix(
+                dense::Mat< ScalarT, Operator::LocalMatrixDim, Operator::LocalMatrixDim > A_fine = fine_op_.get_local_matrix(
                     local_subdomain_id, fine_hex_idx( 1 ), fine_hex_idx( 2 ), fine_hex_idx( 3 ), wedge );
 
                 // core part: assemble local gca matrix by mapping from coarse wedge to current fine wedge,
                 // applying the corresponding local operator and mapping back.
-                dense::Mat< ScalarT, Operator::LocalDim, Operator::LocalDim > P_vec = { 0 };
-                if constexpr ( Operator::LocalDim == 18 )
+                dense::Mat< ScalarT, Operator::LocalMatrixDim, Operator::LocalMatrixDim > P_vec = { 0 };
+                if constexpr ( Operator::LocalMatrixDim == 18 )
                 {
                     // in a vectorial operator we need to setup a vectorial interpolation
                     for ( int dim = 0; dim < 3; ++dim )
@@ -304,7 +304,7 @@ class TwoGridGCA
                 {
                     Kokkos::abort( "Not implemented." );
                 }
-                dense::Mat< ScalarT, Operator::LocalDim, Operator::LocalDim > PTAP =
+                dense::Mat< ScalarT, Operator::LocalMatrixDim, Operator::LocalMatrixDim > PTAP =
                     P_vec.transposed() * A_fine * P_vec;
 
                 // correctly add to gca coarsened matrix
@@ -332,7 +332,7 @@ class TwoGridGCA
 
         if ( treat_boundary_ )
         {
-            dense::Mat< ScalarT, Operator::LocalDim, Operator::LocalDim > boundary_mask;
+            dense::Mat< ScalarT, Operator::LocalMatrixDim, Operator::LocalMatrixDim > boundary_mask;
             boundary_mask.fill( 1.0 );
 
             for ( int dimi = 0; dimi < 3; ++dimi )
