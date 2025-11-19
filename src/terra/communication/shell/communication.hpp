@@ -154,9 +154,18 @@ class SubdomainNeighborhoodSendRecvBuffer
 
 /// @brief Packs, sends and recvs local subdomain boundaries using two sets of buffers.
 ///
-/// @note Must be complemented with `unpack_and_reduce_local_subdomain_boundaries()` to complete communication.
+/// Communication works like this:
+/// - data is packed from the boundaries of the grid data structure into send buffers
+/// - the send buffers are sent via MPI
+/// - the data is received in receive buffers
+/// - the receive buffers are unpacked into the grid data structure (and the data is potentially rotated if necessary)
 ///
-/// Waits until all recv buffers are filled - but does not unpack.
+/// If the sending and receiving subdomains are on the same process, the data is directly packed into the recv buffers.
+/// However, not yet directly written from subdomain A to subdomain B. This and further optimizations are obviously
+/// possible.
+///
+/// @note Must be complemented with `unpack_and_reduce_local_subdomain_boundaries()` to complete communication.
+///       This function waits until all recv buffers are filled - but does not unpack.
 ///
 /// Performs "additive" communication. Nodes at the subdomain interfaces overlap and will be reduced using some
 /// reduction mode during the receiving phase. This is typically required for matrix-free matrix-vector multiplications
@@ -181,6 +190,14 @@ void pack_send_and_recv_local_subdomain_boundaries(
     SubdomainNeighborhoodSendRecvBuffer< typename GridDataType::value_type, grid::grid_data_vec_dim< GridDataType >() >&
         boundary_recv_buffers )
 {
+    // Left this switch here (for debugging). Toggle to choose between
+    // - copying data directly into recv buffers if sender and receiver subdomains
+    //   are on the same rank (enable_local_comm == true) and
+    // - still simply sending via MPI: first copy to send buffer, send, then copy from recv buffer to data
+    //   (enable_local_comm == false)
+    // Further optimizations are possible ofc.
+    constexpr bool enable_local_comm = true;
+
     // Since it is not clear whether a static last dimension of 1 impacts performance, we want to support both
     // scalar and vector-valued grid data views. To simplify matters, we always use the vector-valued versions for the
     // buffers.
@@ -343,6 +360,12 @@ void pack_send_and_recv_local_subdomain_boundaries(
 
     for ( const auto& send_recv_pair : send_recv_pairs )
     {
+        // We will handle local communication via direct copies in the send loop.
+        if ( enable_local_comm && send_recv_pair.local_rank == send_recv_pair.neighbor_rank )
+        {
+            continue;
+        }
+
         ScalarType* recv_buffer_ptr  = nullptr;
         int         recv_buffer_size = 0;
 
@@ -415,6 +438,8 @@ void pack_send_and_recv_local_subdomain_boundaries(
 
     for ( const auto& send_recv_pair : send_recv_pairs )
     {
+        const auto local_comm = enable_local_comm && send_recv_pair.local_rank == send_recv_pair.neighbor_rank;
+
         // Packing buffer.
 
         const auto local_subdomain_id = send_recv_pair.local_subdomain_id;
@@ -426,6 +451,34 @@ void pack_send_and_recv_local_subdomain_boundaries(
 
         if ( send_recv_pair.boundary_type == 0 )
         {
+            const auto local_vertex_boundary =
+                static_cast< grid::BoundaryVertex >( send_recv_pair.local_subdomain_boundary );
+
+            if ( local_comm )
+            {
+                // Handling local communication and moving on to next send_recv_pair afterward.
+                const auto& recv_buffer = boundary_recv_buffers.buffer_vertex(
+                    send_recv_pair.local_subdomain,
+                    static_cast< grid::BoundaryVertex >( send_recv_pair.local_subdomain_boundary ),
+                    send_recv_pair.neighbor_subdomain,
+                    static_cast< grid::BoundaryVertex >( send_recv_pair.neighbor_subdomain_boundary ) );
+
+                if ( !domain.subdomains().contains( send_recv_pair.neighbor_subdomain ) )
+                {
+                    Kokkos::abort( "Subdomain not found locally - but it should be there..." );
+                }
+
+                const auto local_subdomain_id_of_neighboring_subdomain =
+                    std::get< 0 >( domain.subdomains().at( send_recv_pair.neighbor_subdomain ) );
+
+                copy_to_buffer(
+                    recv_buffer,
+                    data,
+                    local_subdomain_id_of_neighboring_subdomain,
+                    static_cast< grid::BoundaryVertex >( send_recv_pair.neighbor_subdomain_boundary ) );
+                continue;
+            }
+
             auto& send_buffer = boundary_send_buffers.buffer_vertex(
                 send_recv_pair.local_subdomain,
                 static_cast< grid::BoundaryVertex >( send_recv_pair.local_subdomain_boundary ),
@@ -435,13 +488,38 @@ void pack_send_and_recv_local_subdomain_boundaries(
             send_buffer_ptr  = send_buffer.data();
             send_buffer_size = send_buffer.span();
 
-            const auto local_vertex_boundary =
-                static_cast< grid::BoundaryVertex >( send_recv_pair.local_subdomain_boundary );
-
             copy_to_buffer( send_buffer, data, local_subdomain_id, local_vertex_boundary );
         }
         else if ( send_recv_pair.boundary_type == 1 )
         {
+            const auto local_edge_boundary =
+                static_cast< grid::BoundaryEdge >( send_recv_pair.local_subdomain_boundary );
+
+            if ( local_comm )
+            {
+                // Handling local communication and moving on to next send_recv_pair afterward.
+                const auto& recv_buffer = boundary_recv_buffers.buffer_edge(
+                    send_recv_pair.local_subdomain,
+                    static_cast< grid::BoundaryEdge >( send_recv_pair.local_subdomain_boundary ),
+                    send_recv_pair.neighbor_subdomain,
+                    static_cast< grid::BoundaryEdge >( send_recv_pair.neighbor_subdomain_boundary ) );
+
+                if ( !domain.subdomains().contains( send_recv_pair.neighbor_subdomain ) )
+                {
+                    Kokkos::abort( "Subdomain not found locally - but it should be there..." );
+                }
+
+                const auto local_subdomain_id_of_neighboring_subdomain =
+                    std::get< 0 >( domain.subdomains().at( send_recv_pair.neighbor_subdomain ) );
+
+                copy_to_buffer(
+                    recv_buffer,
+                    data,
+                    local_subdomain_id_of_neighboring_subdomain,
+                    static_cast< grid::BoundaryEdge >( send_recv_pair.neighbor_subdomain_boundary ) );
+                continue;
+            }
+
             auto& send_buffer = boundary_send_buffers.buffer_edge(
                 send_recv_pair.local_subdomain,
                 static_cast< grid::BoundaryEdge >( send_recv_pair.local_subdomain_boundary ),
@@ -451,13 +529,38 @@ void pack_send_and_recv_local_subdomain_boundaries(
             send_buffer_ptr  = send_buffer.data();
             send_buffer_size = send_buffer.span();
 
-            const auto local_edge_boundary =
-                static_cast< grid::BoundaryEdge >( send_recv_pair.local_subdomain_boundary );
-
             copy_to_buffer( send_buffer, data, local_subdomain_id, local_edge_boundary );
         }
         else if ( send_recv_pair.boundary_type == 2 )
         {
+            const auto local_face_boundary =
+                static_cast< grid::BoundaryFace >( send_recv_pair.local_subdomain_boundary );
+
+            if ( local_comm )
+            {
+                // Handling local communication and moving on to next send_recv_pair afterward.
+                const auto& recv_buffer = boundary_recv_buffers.buffer_face(
+                    send_recv_pair.local_subdomain,
+                    static_cast< grid::BoundaryFace >( send_recv_pair.local_subdomain_boundary ),
+                    send_recv_pair.neighbor_subdomain,
+                    static_cast< grid::BoundaryFace >( send_recv_pair.neighbor_subdomain_boundary ) );
+
+                if ( !domain.subdomains().contains( send_recv_pair.neighbor_subdomain ) )
+                {
+                    Kokkos::abort( "Subdomain not found locally - but it should be there..." );
+                }
+
+                const auto local_subdomain_id_of_neighboring_subdomain =
+                    std::get< 0 >( domain.subdomains().at( send_recv_pair.neighbor_subdomain ) );
+
+                copy_to_buffer(
+                    recv_buffer,
+                    data,
+                    local_subdomain_id_of_neighboring_subdomain,
+                    static_cast< grid::BoundaryFace >( send_recv_pair.neighbor_subdomain_boundary ) );
+                continue;
+            }
+
             const auto& send_buffer = boundary_send_buffers.buffer_face(
                 send_recv_pair.local_subdomain,
                 static_cast< grid::BoundaryFace >( send_recv_pair.local_subdomain_boundary ),
@@ -466,9 +569,6 @@ void pack_send_and_recv_local_subdomain_boundaries(
 
             send_buffer_ptr  = send_buffer.data();
             send_buffer_size = send_buffer.span();
-
-            const auto local_face_boundary =
-                static_cast< grid::BoundaryFace >( send_recv_pair.local_subdomain_boundary );
 
             copy_to_buffer( send_buffer, data, local_subdomain_id, local_face_boundary );
         }
@@ -479,8 +579,7 @@ void pack_send_and_recv_local_subdomain_boundaries(
 
         Kokkos::fence( "deep_copy_into_send_buffer" );
 
-        // Schedule Isend.
-
+        // Schedule Isend (non-local comm).
         MPI_Request data_send_request;
         MPI_Isend(
             send_buffer_ptr,
@@ -504,6 +603,8 @@ void pack_send_and_recv_local_subdomain_boundaries(
 /// @brief Unpacks and reduces local subdomain boundaries.
 ///
 /// The recv buffers must be the same instances as used during sending in `pack_send_and_recv_local_subdomain_boundaries()`.
+///
+/// See `pack_send_and_recv_local_subdomain_boundaries()` for more details on how the communication works.
 ///
 /// @param domain the DistributedDomain that this works on
 /// @param data the data (Kokkos::View) to be communicated
