@@ -230,6 +230,8 @@ util::Table
 /// @brief Linearly interpolates radial data from a std::vector (host) into a 2D grid (device) with dimensions
 /// (local_subdomain_id, subdomain_size_r) for straightforward use in kernels.
 ///
+/// This function takes care of handling possibly duplicated nodes at subdomain boundaries.
+///
 /// @note This will clamp values outside the passed radial profile values to the first and last values in the vector
 ///       respectively.
 ///
@@ -312,9 +314,10 @@ grid::Grid2DDataScalar< ProfileOutDataType > interpolate_radial_profile_into_sub
     return profile_data;
 }
 
-/// @brief Interpolating radial profiles in to grid for each local subdomain.
-///        This is just a convenient wrapper around \ref interpolate_radial_profile_into_subdomains() that also
-///        reads the CSV file.
+/// @brief Interpolating a radial profile from a CSV file into a grid.
+///
+/// This is just a convenient wrapper around \ref interpolate_radial_profile_into_subdomains() that also
+/// reads the CSV file.
 ///
 /// @note This will clamp values outside the passed radial profile values to the first and last values in the vector
 ///       respectively.
