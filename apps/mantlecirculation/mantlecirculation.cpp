@@ -239,18 +239,22 @@ Result<> run( const Parameters& prm )
     // Set up viscosity.
 
     std::vector< Grid2DDataScalar< ScalarType > > radial_viscosity_profile;
-    for ( int level = 0; level < num_levels; level++ )
+
+    if ( !prm.physics_parameters.viscosity_parameters.radial_profile_enabled )
     {
-        if ( !prm.physics_parameters.viscosity_parameters.radial_profile_enabled )
+        logroot << "Using constant viscosity profile." << std::endl;
+        for ( int level = 0; level < num_levels; level++ )
         {
-            logroot << "Using constant viscosity profile." << std::endl;
             radial_viscosity_profile.push_back(
                 shell::interpolate_constant_radial_profile( coords_radii[level], 1.0 ) );
         }
-        else
+    }
+    else
+    {
+        logroot << "Using radially varying viscosity profile." << std::endl;
+        // Temp dep. visc. not yet implemented.
+        for ( int level = 0; level < num_levels; level++ )
         {
-            logroot << "Using radially varying viscosity profile." << std::endl;
-            // Temp dep. visc. not yet implemented.
             radial_viscosity_profile.push_back(
                 shell::interpolate_radial_profile_into_subdomains_from_csv(
                     prm.physics_parameters.viscosity_parameters.radial_profile_csv_filename,
@@ -377,6 +381,8 @@ Result<> run( const Parameters& prm )
 
     // Multigrid operators
 
+    logroot << "Setting up Stokes solver and preconditioners ..." << std::endl;
+
     std::vector< Viscous >      A_c;
     std::vector< Prolongation > P;
     std::vector< Restriction >  R;
@@ -467,6 +473,8 @@ Result<> run( const Parameters& prm )
             omega_opt );
     }
 
+    logroot << "Setting up multigrid coarse grid solver ..." << std::endl;
+
     using CoarseGridSolver = linalg::solvers::PCG< Viscous >;
 
     std::vector< VectorQ1Vec< ScalarType > > coarse_grid_tmps;
@@ -478,6 +486,8 @@ Result<> run( const Parameters& prm )
 
     CoarseGridSolver coarse_grid_solver(
         linalg::solvers::IterativeSolverParameters{ 50, 1e-6, 1e-16 }, table, coarse_grid_tmps );
+
+    logroot << "Setting up multigrid preconditioner ..." << std::endl;
 
     using PrecVisc = linalg::solvers::Multigrid< Viscous, Prolongation, Restriction, Smoother, CoarseGridSolver >;
     PrecVisc prec_11(
@@ -494,6 +504,8 @@ Result<> run( const Parameters& prm )
         1e-6 );
 
     // Schur complement: lumped inverse diagonal of pressure mass
+
+    logroot << "Setting up Schur complement preconditioner ..." << std::endl;
 
     VectorQ1Scalar< ScalarType > k_pm( "k_pm", domains[pressure_level], ownership_mask_data[pressure_level] );
     assign( k_pm, eta[pressure_level] );
@@ -519,6 +531,8 @@ Result<> run( const Parameters& prm )
 
     // Set up outer block-preconditioner
 
+    logroot << "Setting up outer block-preconditioner ..." << std::endl;
+
     using PrecStokes = linalg::solvers::
         BlockTriangularPreconditioner2x2< Stokes, Viscous, PressureMass, Gradient, PrecVisc, PrecSchur >;
 
@@ -530,6 +544,8 @@ Result<> run( const Parameters& prm )
         ownership_mask_data[pressure_level] );
 
     PrecStokes prec_stokes( K.block_11(), pmass, K.block_12(), triangular_prec_tmp, prec_11, inv_lumped_pmass );
+
+    logroot << "Setting up FGMRES ..." << std::endl;
 
     linalg::solvers::FGMRES< Stokes, PrecStokes > stokes_fgmres(
         stokes_tmp_fgmres,
@@ -543,6 +559,8 @@ Result<> run( const Parameters& prm )
     /////////////////////
     /// ENERGY SOLVER ///
     /////////////////////
+
+    logroot << "Setting up energy equation solver ..." << std::endl;
 
     using AD = fe::wedge::operators::shell::UnsteadyAdvectionDiffusionSUPG< ScalarType >;
 
@@ -653,9 +671,15 @@ Result<> run( const Parameters& prm )
     xdmf_output.add( u.block_1().grid_data() );
     xdmf_output.add( eta[velocity_level].grid_data() );
 
+    logroot << "Writing initial XDMF ..." << std::endl;
+
     xdmf_output.write();
 
+    logroot << "Writing initial radial profiles ..." << std::endl;
+
     compute_and_write_radial_profiles( T, subdomain_shell_idx, domains[velocity_level], prm.io_parameters, 0 );
+    compute_and_write_radial_profiles(
+        eta[velocity_level], subdomain_shell_idx, domains[velocity_level], prm.io_parameters, 0 );
 
     ScalarType simulated_time = 0.0;
 
@@ -664,6 +688,8 @@ Result<> run( const Parameters& prm )
     const auto h = grid::shell::min_radial_h( domains[velocity_level].domain_info().radii() );
 
     // Time stepping
+
+    logroot << "Starting time stepping!" << std::endl;
 
     for ( int timestep = 1; timestep < prm.time_stepping_parameters.max_timesteps; timestep++ )
     {
