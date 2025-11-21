@@ -431,7 +431,7 @@ std::tuple< double, double, int > test( int min_level, int max_level, const std:
                 for ( int dimj = 0; dimj < 3; dimj++ )
                 {
                     TwoGridGCA< ScalarType, Viscous >(
-                        ( level == num_levels - 2 ) ? K_neumann.block_11() : A_c[level + 1], A_c[level], dimi, dimj );
+                        ( level == num_levels - 2 ) ? K_neumann.block_11() : A_c[level + 1], A_c[level] );
                 }
             }
         }

@@ -36,20 +36,16 @@ class TwoGridGCA
     grid::Grid3DDataVec< ScalarT, 3 >& grid_fine_;
     grid::Grid2DDataScalar< ScalarT >& radii_fine_;
     grid::Grid2DDataScalar< ScalarT >& radii_coarse_;
-    int                                dimi_ = 0;
-    int                                dimj_ = 0;
     bool                               treat_boundary_;
 
   public:
-    explicit TwoGridGCA( Operator fine_op, Operator coarse_op, int dimi = 0, int dimj = 0, bool treat_boundary = true )
+    explicit TwoGridGCA( Operator fine_op, Operator coarse_op, bool treat_boundary = true )
     : domain_fine_( fine_op.get_domain() )
     , fine_op_( fine_op )
     , coarse_op_( coarse_op )
     , grid_fine_( fine_op.get_grid() )
     , radii_fine_( fine_op.get_radii() )
     , radii_coarse_( coarse_op.get_radii() )
-    , dimi_( dimi )
-    , dimj_( dimj )
     , treat_boundary_( treat_boundary )
 
     {
@@ -348,8 +344,8 @@ class TwoGridGCA
                         {
                             for ( int j = 0; j < num_nodes_per_wedge; j++ )
                             {
-                                if ( ( dimi_ == dimj_ && i != j && ( i < 3 || j < 3 ) ) or
-                                     ( dimi_ != dimj_ && ( i < 3 || j < 3 ) ) )
+                                if ( ( dimi == dimj && i != j && ( i < 3 || j < 3 ) ) or
+                                     ( dimi != dimj && ( i < 3 || j < 3 ) ) )
                                 {
                                     boundary_mask( i + dimi * num_nodes_per_wedge, j + dimj * num_nodes_per_wedge ) =
                                         0.0;
@@ -365,8 +361,8 @@ class TwoGridGCA
                         {
                             for ( int j = 0; j < num_nodes_per_wedge; j++ )
                             {
-                                if ( ( dimi_ == dimj_ && i != j && ( i >= 3 || j >= 3 ) ) or
-                                     ( dimi_ != dimj_ && ( i >= 3 || j >= 3 ) ) )
+                                if ( ( dimi == dimj && i != j && ( i >= 3 || j >= 3 ) ) or
+                                     ( dimi != dimj && ( i >= 3 || j >= 3 ) ) )
                                 {
                                     boundary_mask( i + dimi * num_nodes_per_wedge, j + dimj * num_nodes_per_wedge ) =
                                         0.0;
