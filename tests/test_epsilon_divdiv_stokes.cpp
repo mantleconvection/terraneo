@@ -38,6 +38,7 @@
 
 using namespace terra;
 
+using fe::wedge::operators::shell::TwoGridGCA;
 using grid::Grid2DDataScalar;
 using grid::Grid3DDataScalar;
 using grid::Grid3DDataVec;
@@ -46,11 +47,10 @@ using grid::Grid4DDataVec;
 using grid::shell::DistributedDomain;
 using grid::shell::DomainInfo;
 using grid::shell::SubdomainInfo;
+using linalg::DiagonallyScaledOperator;
 using linalg::VectorQ1IsoQ2Q1;
 using linalg::VectorQ1Scalar;
 using linalg::VectorQ1Vec;
-using fe::wedge::operators::shell::TwoGridGCA;
-using linalg::DiagonallyScaledOperator;
 using linalg::solvers::DiagonalSolver;
 using linalg::solvers::power_iteration;
 
@@ -426,14 +426,9 @@ std::tuple< double, double, int > test( int min_level, int max_level, const std:
         for ( int level = num_levels - 2; level >= 0; level-- )
         {
             std::cout << "Assembling GCA on level " << level << std::endl;
-            for ( int dimi = 0; dimi < 3; dimi++ )
-            {
-                for ( int dimj = 0; dimj < 3; dimj++ )
-                {
-                    TwoGridGCA< ScalarType, Viscous >(
-                        ( level == num_levels - 2 ) ? K_neumann.block_11() : A_c[level + 1], A_c[level] );
-                }
-            }
+
+            TwoGridGCA< ScalarType, Viscous >(
+                ( level == num_levels - 2 ) ? K_neumann.block_11() : A_c[level + 1], A_c[level] );
         }
     }
 
