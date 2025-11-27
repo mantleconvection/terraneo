@@ -455,12 +455,14 @@ Result<> run( const Parameters& prm )
         if ( level == num_levels - 1 )
         {
             linalg::DiagonallyScaledOperator inv_diag_A( K.block_11(), inverse_diagonals[level] );
-            max_ev = linalg::solvers::power_iteration( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
+            max_ev = linalg::solvers::power_iteration(
+                inv_diag_A, tmp_pi_0, tmp_pi_1, prm.stokes_solver_parameters.viscous_pc_num_power_iterations );
         }
         else
         {
             linalg::DiagonallyScaledOperator inv_diag_A( A_c[level], inverse_diagonals[level] );
-            max_ev = linalg::solvers::power_iteration( inv_diag_A, tmp_pi_0, tmp_pi_1, 100 );
+            max_ev = linalg::solvers::power_iteration(
+                inv_diag_A, tmp_pi_0, tmp_pi_1, prm.stokes_solver_parameters.viscous_pc_num_power_iterations );
         }
         const auto omega_opt = 2.0 / ( 1.1 * max_ev );
 

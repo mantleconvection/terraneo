@@ -45,6 +45,7 @@ struct StokesSolverParameters
 
     int viscous_pc_num_vcycles                 = 2;
     int viscous_pc_num_smoothing_steps_prepost = 2;
+    int viscous_pc_num_power_iterations        = 10;
 };
 
 struct EnergySolverParameters
@@ -178,6 +179,11 @@ inline util::Result< std::variant< CLIHelp, Parameters > > parse_parameters( int
         app,
         "--stokes-viscous-pc-num-smoothing-steps-prepost",
         parameters.stokes_solver_parameters.viscous_pc_num_smoothing_steps_prepost )
+        ->group( "Stokes Solver" );
+    add_option_with_default(
+        app,
+        "--stokes-viscous-pc-num-power-iterations",
+        parameters.stokes_solver_parameters.viscous_pc_num_power_iterations )
         ->group( "Stokes Solver" );
 
     //////////////////////
