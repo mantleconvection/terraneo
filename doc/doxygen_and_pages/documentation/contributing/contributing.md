@@ -1,6 +1,6 @@
 # Contributing {#contributing}
 
-> TL;DR: We are employing a simple fork workflow with a dev branch.
+> TL;DR: We are employing a simple fork workflow on the main branch.
 
 First of all: thanks for contributing.
 
@@ -39,18 +39,18 @@ git remote add upstream https://github.com/mantleconvection/terraneo.git
 ```
 You only do this once.
 
-#### 4. Always start from the latest dev branch
+#### 4. Always start from the latest main branch
 
 Before creating new work:
 ```
 git fetch upstream
-git checkout dev
-git pull upstream dev
+git checkout main
+git pull upstream main
 ```
 
 #### 5. Create a new branch for your change
 
-Never work directly on dev.
+Never work directly on main.
 ```
 git checkout -b feature/my-change
 ```
@@ -76,7 +76,7 @@ Keep commit messages simple and clear and so that others can directly see what y
 Make sure your branch has the latest updates from the project:
 ```
 git fetch upstream
-git pull upstream dev
+git pull upstream main
 ```
 
 If it asks about conflicts, fix them if you can.
@@ -94,7 +94,7 @@ GitHub will show a “Compare & pull request” button.
 
 Make sure the PR target is:
 ```
-base: dev   ←   compare: feature/my-change
+base: main   ←   compare: feature/my-change
 ```
 
 In your PR description:
@@ -103,4 +103,4 @@ In your PR description:
 
 That’s it!
 
-A maintainer will review the PR and merge it into dev.
+A maintainer will review the PR and merge it into main.
