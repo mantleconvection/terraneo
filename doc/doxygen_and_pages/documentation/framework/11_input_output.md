@@ -18,8 +18,8 @@ the console this class can be useful. Consider this for writing to CSV or JSON f
 ## Radial profiles (input)
 
 Radial profiles can be read from CSV files. Have a look at the functions
-\ref terra::util::interpolate_radial_profile_into_subdomains() and
-\ref terra::util::interpolate_radial_profile_into_subdomains_from_csv()
+\ref terra::shell::interpolate_radial_profile_into_subdomains() and
+\ref terra::shell::interpolate_radial_profile_into_subdomains_from_csv()
 for more details.
 
 A small tool for reading and visualizing radial profiles is provided in `apps/tools/visualize_radial_profiles.cpp`.
