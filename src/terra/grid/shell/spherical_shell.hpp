@@ -14,6 +14,30 @@
 
 namespace terra::grid::shell {
 
+// snake_case for functions, argument, and variables
+
+float some_function( float some_arg )
+{
+    float some_var = 0.0;
+    return some_arg + some_var;
+}
+
+// CamelCase for classes
+
+class SomeClass
+{
+  public:
+    void some_method() { /* ... */ } // snake_case for methods.
+
+  private:
+    int some_private_member_; // underscore at the end for member variables
+};
+
+struct SomeDataStruct
+{
+    int some_struct_member; // if public and simply in a container - no underscore at the end
+};
+
 /// @brief Computes the radial shell radii for a uniform grid.
 ///
 /// Note that a shell is a 2D manifold in 3D space.
@@ -474,7 +498,6 @@ void unit_sphere_single_shell_subdomain_coords(
 class SubdomainInfo
 {
   public:
-
     /// @brief Creates invalid ID.
     SubdomainInfo()
     : diamond_id_( -1 )

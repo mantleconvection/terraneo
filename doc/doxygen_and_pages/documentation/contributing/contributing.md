@@ -1,8 +1,48 @@
 # Contributing {#contributing}
 
-> TL;DR: We are employing a simple fork workflow on the main branch.
+Thanks for contributing 🙂‍↕️
 
-First of all: thanks for contributing.
+## Coding style
+
+Please [format your code](https://clang.llvm.org/docs/ClangFormat.html) with `clang-format`
+**before committing**
+(the project ships a `.clang-format` file).
+
+Also, please roughly adapt to the coding style of the project.
+Short overview (you may as well inspect the code):
+```cpp
+namespace terra::grid::shell {      // mimic directory structure - use this for a file in src/terra/grid/shell/ 
+
+// snake_case for functions, argument, and variables
+
+float some_function( float some_arg )
+{
+    float some_var = 1.0f;
+    return some_arg + some_var;
+}
+
+// CamelCase for classes
+
+class SomeClass
+{
+  public:
+    void some_method() { /* ... */ } // snake_case for methods.
+
+  private:
+    int some_private_member_; // underscore at the end for (private) member variables
+};
+
+struct SomeDataStruct
+{
+    int some_struct_member; // if public and simply in a container - no underscore at the end
+};
+
+}
+```
+
+## Pull requests
+
+> TL;DR: We are employing a simple fork workflow on the main branch.
 
 Here's a short guide on how to get started.
 
