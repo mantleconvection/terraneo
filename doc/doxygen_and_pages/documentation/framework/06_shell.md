@@ -104,7 +104,7 @@ The concrete coordinates of the nodes are computed with two functions:
   `coords_radii( local_subdomain_id, r_index )`
   The cartesian coordinate of a node `( local_subdomain_id, x_index, y_index, r_index )` can then be computed via
 
-```
+```cpp
     Vec3 cartesian_coords;
     cartesian_coords( 0 ) = coords_shell( local_subdomain_id, x_index, y_index, 0 );
     cartesian_coords( 1 ) = coords_shell( local_subdomain_id, x_index, y_index, 1 );

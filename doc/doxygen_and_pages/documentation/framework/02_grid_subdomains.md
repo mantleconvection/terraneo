@@ -24,7 +24,7 @@ be used to represent a cell index instead.
 Grid data is allocated directly using the `Kokkos::View` class. For convenience, we provide type aliases for the most
 commonly used grid data types in \ref grid_types.hpp. You can allocate grid data views as follows:
 
-```c++
+```cpp
     // Example for a 4D grid (3D grid per subdomain, scalar nodal data, float64)
     GridData4DScalar< double > data_scalar( "my_data_scalar", num_local_subdomains, num_nodes_x, num_nodes_y, num_nodes_r );
     
@@ -44,7 +44,7 @@ standard Kokkos kernels; there is no wrapper around the view). Refer to the Kokk
 `Kokkos::View`s implement `operator()` for accessing entries.
 For example, data is accessed like so:
 
-```c++
+```cpp
     auto val_scalar = data_scalar( local_subdomain_id, node_x, node_y, node_r );     // for scalar data, 3D, nodal
     
     data_vec( local_subdomain_id, node_x, node_y, node_r, vector_entry ) = val_vec;  // for vector-valued data, 3D, nodal
@@ -119,7 +119,7 @@ Also, use the provided functions for the \ref terra::linalg::VectorLike concept 
 Those already take care of the overlapping data at subdomain boundaries.
 
 Examples:
-```c++
+```cpp
       using terra::linalg::dot;
       using terra::linalg::lincomb;
 
@@ -146,7 +146,7 @@ Before writing your own kernels, you should check if there is a kernel that alre
 in \ref grid_operations.hpp.
 
 Examples:
-```c++
+```cpp
       
     using terra::kernels::common::extract_vector_component;
     using terra::kernels::common::count_masked;    
@@ -178,7 +178,7 @@ and one for masking data that indicates which coefficients are "owned" by the su
 Also refer to the sections on [communication](#communication) and [flags and mask data](#flag-fields-and-masks)
 
 Examples:
-```c++
+```cpp
 
 // Using a lambda (for simple kernels)
 
