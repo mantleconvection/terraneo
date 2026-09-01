@@ -1,3 +1,13 @@
 build/
 .idea/
 doc/doxygen_and_pages/html/apps/benchmarks/performance/scaling_scripts/
+
+# --- machine-learning work (terra::ml / python/terra_{data,infer}) ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+# trained models, prediction dumps and generated datasets: these are large and
+# regenerable, and /home/hpc is quota-limited. Datasets belong in an hpc-workspace.
+*.pt
+*.npz
+stokes_dataset*/

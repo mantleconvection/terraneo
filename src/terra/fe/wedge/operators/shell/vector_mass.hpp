@@ -4,6 +4,8 @@
 #include "communication/shell/communication.hpp"
 #include "dense/vec.hpp"
 #include "fe/wedge/integrands.hpp"
+#include "fe/wedge/kernel_helpers.hpp"
+#include "fe/wedge/quadrature/quadrature.hpp"
 #include "grid/shell/spherical_shell.hpp"
 #include "linalg/operator.hpp"
 #include "linalg/vector.hpp"

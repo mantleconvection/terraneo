@@ -35,6 +35,24 @@ if (MPI_FOUND)
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${MPI_CXX_LINK_FLAGS}")
 endif ()
 
+# Embedded CPython for terra::ml::NeuralSolver. Off by default: a normal build
+# must not need Python development headers.
+option(TERRA_ENABLE_PYTHON "Build terra::ml::NeuralSolver against an embedded CPython" OFF)
+if (TERRA_ENABLE_PYTHON)
+    find_package(Python3 REQUIRED COMPONENTS Development.Embed)
+    message(STATUS "terra::ml: embedding Python ${Python3_VERSION} from ${Python3_LIBRARIES}")
+
+    # A conda Python is usually built against a newer libstdc++ than the system one
+    # nvc++ links against (GLIBCXX_3.4.33 vs 3.4.29 here). Put conda's on the link
+    # line first -- it is backward compatible, and without it the link fails inside
+    # libicuuc with an undefined std::condition_variable::wait@GLIBCXX_3.4.30.
+    get_filename_component(_py_libdir "${Python3_LIBRARY_DIRS}" ABSOLUTE)
+    find_library(TERRA_PY_STDCXX stdc++ PATHS "${_py_libdir}" NO_DEFAULT_PATH)
+    if (TERRA_PY_STDCXX)
+        message(STATUS "terra::ml: prepending ${TERRA_PY_STDCXX} for GLIBCXX compatibility")
+    endif ()
+endif ()
+
 set(EIGEN_DIR extern/eigen-3.4.0 CACHE PATH "eigen path")
 include_directories(SYSTEM ${EIGEN_DIR})
 link_directories(${EIGEN_DIR})

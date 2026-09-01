@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "terra-ml"
+version = "0.1.0"
+description = "Operator learning for the TERRA-NG Stokes solver: manufactured datasets, a wavelet/spectral neural operator, and the solver-side inference entry point"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "torch>=2.0",
+    "scipy>=1.10",   # spherical harmonics (lpmv) and the nested-mesh KD-tree
+    "sympy>=1.12",   # analytic right-hand sides for the manufactured solutions
+]
+
+[project.optional-dependencies]
+plots = ["matplotlib>=3.7"]
+
+[tool.setuptools]
+packages = ["terra_data", "terra_infer"]

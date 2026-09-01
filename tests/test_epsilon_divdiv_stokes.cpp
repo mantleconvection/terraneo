@@ -33,6 +33,9 @@
 #include "linalg/solvers/pminres.hpp"
 #include "linalg/solvers/richardson.hpp"
 #include "linalg/vector_q1isoq2_q1.hpp"
+#ifdef TERRA_ENABLE_PYTHON
+#include "ml/neural_solver.hpp"
+#endif
 #include "terra/dense/mat.hpp"
 #include "terra/fe/wedge/operators/shell/mass.hpp"
 #include "terra/grid/grid_types.hpp"
@@ -250,6 +253,7 @@ test( double kmax,
       int radial_extra_levels,
       int lat_sdr_override,
       int rad_sdr_override,
+      const std::string&                    neural_model,
       const std::shared_ptr< util::Table >& table )
 {
     using ScalarType = double;
@@ -643,7 +647,27 @@ test( double kmax,
 
     util::logroot << "Solve ...\n";
     assign( u, 0 );
-    linalg::solvers::solve( fgmres, K, u, f );
+
+    if ( neural_model.empty() )
+    {
+        linalg::solvers::solve( fgmres, K, u, f );
+    }
+    else
+    {
+#ifdef TERRA_ENABLE_PYTHON
+        // Same call, different solver: NeuralSolver hands (u, p) to a Python model
+        // running in this process and writes the reply back into u.
+        terra::ml::NeuralSolverOptions neural_options;
+        neural_options.model = neural_model;
+
+        terra::ml::NeuralSolver< Stokes > neural(
+            neural_options, domains[velocity_level], domains[pressure_level], stok_vecs["tmp_7"] );
+
+        linalg::solvers::solve( neural, K, u, f );
+#else
+        Kokkos::abort( "--neural-solver needs a build configured with -DTERRA_ENABLE_PYTHON=ON." );
+#endif
+    }
 
     solver_table->query_rows_equals( "tag", "fgmres_solver" )
         .select_columns( { "absolute_residual", "relative_residual", "iteration" } )
@@ -727,8 +751,9 @@ int main( int argc, char** argv )
     // anisotropy: radial diamond level at each MG level L becomes L + radial_extra_levels.
     int max_level           = 6;
     int radial_extra_levels = 0;
-    int lat_sdr             = -1;
-    int rad_sdr             = -1;
+    int         lat_sdr      = -1;
+    int         rad_sdr      = -1;
+    std::string neural_model = "";
     {
         CLI::App app{ "test_epsilon_divdiv_stokes" };
         util::add_option_with_default( app, "--max-level", max_level, "Finest lateral diamond refinement level." );
@@ -741,6 +766,13 @@ int main( int argc, char** argv )
             app, "--lat-sdr", lat_sdr, "Override lateral subdomain refinement level (default: use level_subdomains)." );
         util::add_option_with_default(
             app, "--rad-sdr", rad_sdr, "Override radial subdomain refinement level (default: use level_subdomains)." );
+        util::add_option_with_default(
+            app,
+            "--neural-solver",
+            neural_model,
+            "Replace FGMRES with terra::ml::NeuralSolver, handing (u,p) to this model in "
+            "terra_infer (empty = use FGMRES; built in: 'zero', 'echo', 'scale', 'torch'). "
+            "Needs -DTERRA_ENABLE_PYTHON=ON." );
         CLI11_PARSE( app, argc, argv );
     }
 
@@ -785,7 +817,16 @@ int main( int argc, char** argv )
                         timer.reset();
 
                         const auto [l2_error_vel, l2_error_pre, iterations] = test(
-                            kmax, gca, minlevel, level, level_subdomains, radial_extra_levels, lat_sdr, rad_sdr, table );
+                            kmax,
+                            gca,
+                            minlevel,
+                            level,
+                            level_subdomains,
+                            radial_extra_levels,
+                            lat_sdr,
+                            rad_sdr,
+                            neural_model,
+                            table );
 
                         const auto time_total = timer.seconds();
 
