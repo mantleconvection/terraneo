@@ -822,6 +822,24 @@ class StokesContext
             linalg::apply( mass_rhs, stok_vecs_["f"].block_2() );
         }
 
+        // Apply TALA RHS to mass equation if needed...
+        if ( compressible )
+        {
+            using MassRHS = fe::wedge::linearforms::shell::InvRhoGradRhoDotU< ScalarType, RhoFieldType >;
+
+            MassRHS mass_rhs(
+                *domains_[pressure_level_],
+                *domains_[velocity_level_],
+                coords_shell_[pressure_level_],
+                coords_shell_[velocity_level_],
+                coords_radii_[pressure_level_],
+                coords_radii_[velocity_level_],
+                rho,
+                stok_vecs_["u_prev"].block_1() );
+
+            linalg::apply( mass_rhs, stok_vecs_["f"].block_2() );
+        }
+
         util::logroot << "Solving Stokes ..." << std::endl;
 
         if ( use_float_basis_ )
